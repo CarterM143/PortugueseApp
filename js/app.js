@@ -10,6 +10,7 @@ import { renderReveal, renderCapture, setShared, daysUntil } from './extras.js';
 import { renderNovela } from './novela.js';
 import { renderWalk } from './walk.js';
 import { renderGames, renderGame } from './games.js';
+import { runSync, checkToken } from './sync.js';
 import { renderStats } from './stats.js';
 import { levelOf } from './content.js';
 import { renderExercise, esc, ICON, stressMarkup } from './exercises.js';
@@ -455,6 +456,8 @@ function finishSession() {
   session = null;
   stopSpeaking();
   syncPocket(state).catch(() => {});
+  lastSyncTry = 0;
+  doSync();
   if (wasRehearsal) { toast('Nice rehearsal! 💍'); go('reveal', true); return; }
   go('done', true);
 }
@@ -617,6 +620,11 @@ function renderSettings() {
       <label class="switch"><input type="checkbox" name="pocketHide" ${s.pocketHide ? 'checked' : ''}> Hide the word until I tap (shows "Tap to see today's card")</label>
       <p class="muted small">To keep them off the lock screen: phone Settings → Notifications → Lock screen notifications → <b>Hide content</b>, or turn lock-screen notifications off for <b>Daily</b> only.</p>
     </section>
+    <section class="card form" id="sync">
+      <h2>Sync between devices</h2>
+      <p class="muted small">Keeps your phone and tablet in step through a secret gist on your GitHub account. Progress is merged, so you can practise on either one, in any order.</p>
+      <div data-out="sync"></div>
+    </section>
     <section class="card form">
       <h2>Reveal Day</h2>
       <p class="muted small">Her name, the date, the Para ela pack and your message. <a href="#/reveal">Open Reveal Day ›</a></p>
@@ -631,6 +639,7 @@ function renderSettings() {
     <p class="muted small center">Daily · v${window.APP_VERSION || ''}</p>`;
 
   renderPocketSettings();
+  renderSyncSettings();
   app.querySelector('[name="pocketHide"]').addEventListener('change', (e) => { s.pocketHide = e.target.checked; store.saveSettings(); syncPocket(state).catch(() => {}); });
 
   const retOut = app.querySelector('[data-out="retention"]');
@@ -720,6 +729,105 @@ function renderSettings() {
       toast('Progress reset');
       go('home');
     }
+  });
+}
+
+// ---------------- sync ----------------
+
+let syncing = null;
+let lastSyncTry = 0;
+
+/** Sync with the gist if it's switched on. Quietly does nothing offline or if it ran in the last minute. */
+function doSync({ force = false } = {}) {
+  if (!state.settings.syncToken) return Promise.resolve(null);
+  if (syncing) return syncing;
+  if (!force && Date.now() - lastSyncTry < 60000) return Promise.resolve(null);
+  lastSyncTry = Date.now();
+  syncing = runSync(state, store)
+    .then((r) => {
+      state.syncError = '';
+      const view = location.hash.replace(/^#\/?/, '').split('/')[0];
+      if (r?.changed && !session && ['', 'home', 'stats', 'units'].includes(view)) route();
+      return r;
+    })
+    .catch((err) => { state.syncError = err.message; if (force) throw err; return null; })
+    .finally(() => { syncing = null; });
+  return syncing;
+}
+
+function agoText(ms) {
+  const m = Math.round((Date.now() - ms) / 60000);
+  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`;
+}
+
+function renderSyncSettings() {
+  const box = app.querySelector('[data-out="sync"]');
+  if (!box) return;
+  const s = state.settings;
+  if (!s.syncToken) {
+    box.innerHTML = `
+      <details>
+        <summary>Get a GitHub token (2 minutes)</summary>
+        <ol class="small">
+          <li>On github.com: your profile picture → <b>Settings</b> → <b>Developer settings</b> → <b>Personal access tokens</b> → <b>Fine-grained tokens</b> → <b>Generate new token</b>.</li>
+          <li>Name it <i>Daily sync</i>. Pick an expiry (you'll need a new token when it runs out).</li>
+          <li>Repository access: <b>Public repositories</b> is fine (it doesn't need any).</li>
+          <li>Permissions → Account → <b>Gists: Read and write</b>. Nothing else.</li>
+          <li>Generate, copy it, and paste it below. Use the same token on your phone and tablet.</li>
+        </ol>
+      </details>
+      <label>GitHub token <input type="password" name="syncToken" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="github_pat_…"></label>
+      <button class="btn primary" data-act="sync-on">Connect and sync</button>
+      <p class="small" data-out="sync-msg"></p>
+      <p class="muted small">The token stays on this device and is never included in backups. Secret gists don't show on your profile or in search, but they aren't encrypted: anyone with the exact link could read it.</p>`;
+    box.querySelector('[data-act="sync-on"]').addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      const msg = box.querySelector('[data-out="sync-msg"]');
+      const token = box.querySelector('[name="syncToken"]').value.trim();
+      if (!token) { msg.textContent = 'Paste a token first.'; return; }
+      btn.disabled = true;
+      msg.textContent = 'Checking the token…';
+      try {
+        const login = await checkToken(token);
+        s.syncToken = token;
+        s.syncLogin = login;
+        await store.saveSettings();
+        msg.textContent = 'Syncing…';
+        const r = await doSync({ force: true });
+        toast(r?.created ? 'Sync set up. Now connect your other device.' : 'Synced with your other device ✓');
+        renderSettings();
+      } catch (err) {
+        s.syncToken = '';
+        await store.saveSettings();
+        msg.textContent = `❌ ${err.message}`;
+        btn.disabled = false;
+      }
+    });
+    return;
+  }
+  box.innerHTML = `
+    <p>✅ On${s.syncLogin ? ` (GitHub: ${esc(s.syncLogin)})` : ''}. ${s.syncAt ? `Last synced ${agoText(s.syncAt)}.` : 'Not synced yet.'}</p>
+    ${state.syncError ? `<p class="warn small">Last try failed: ${esc(state.syncError)}</p>` : ''}
+    <p class="muted small">It syncs when you open the app, after each session and when you leave the app.</p>
+    <div class="row"><button class="btn small" data-act="sync-now">Sync now</button>
+      ${s.syncGistId ? `<a class="btn ghost small" href="https://gist.github.com/${esc(s.syncGistId)}" target="_blank" rel="noopener">View gist ↗</a>` : ''}
+      <button class="btn ghost small" data-act="sync-off">Turn off</button></div>
+    <p class="small" data-out="sync-msg"></p>`;
+  box.querySelector('[data-act="sync-now"]').addEventListener('click', async (ev) => {
+    const msg = box.querySelector('[data-out="sync-msg"]');
+    ev.currentTarget.disabled = true;
+    msg.textContent = 'Syncing…';
+    try {
+      const r = await doSync({ force: true });
+      toast(r?.changed ? 'Synced: picked up changes from your other device ✓' : 'Synced ✓');
+      renderSettings();
+    } catch (err) { msg.textContent = `❌ ${err.message}`; ev.currentTarget.disabled = false; }
+  });
+  box.querySelector('[data-act="sync-off"]').addEventListener('click', async () => {
+    if (!confirm('Stop syncing this device? Your progress stays here, and the gist stays on GitHub.')) return;
+    Object.assign(s, { syncToken: '', syncGistId: '', syncAt: 0, syncLogin: '' });
+    await store.saveSettings();
+    renderSettings();
   });
 }
 
@@ -823,9 +931,14 @@ async function boot() {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   syncPocket(state).catch(() => {});
+  doSync();
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') syncPocket(state).catch(() => {});
-    else applyPocketAnswers().then(() => { if (location.hash.match(/^#\/?(home)?$/)) route(); }).catch(() => {});
+    if (document.visibilityState === 'hidden') {
+      syncPocket(state).catch(() => {});
+      doSync();
+    } else {
+      applyPocketAnswers().then(() => { if (location.hash.match(/^#\/?(home)?$/)) route(); }).then(() => doSync()).catch(() => {});
+    }
   });
 }
 

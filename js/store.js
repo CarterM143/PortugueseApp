@@ -33,6 +33,11 @@ export const DEFAULT_SETTINGS = {
   pocketHide: false,   // first notification says nothing until tapped
   // Walk mode
   walkPause: 4,        // seconds to answer before the Portuguese is played
+  // Sync (GitHub Gist)
+  syncToken: '',       // GitHub token: stays on this device, never exported or synced
+  syncGistId: '',
+  syncAt: 0,           // last successful sync (ms)
+  settingsAt: 0,       // when a synced setting last changed (ms)
 };
 
 let dbPromise;
@@ -73,16 +78,25 @@ export const state = {
   seenLessons: new Set(),
   custom: [],                  // your own words: [{id, pt, en, note, source, at}]
   novela: [],                  // story episodes, newest last
+  deleted: [],                 // ids of your own words you deleted (so sync doesn't bring them back)
 };
 
+// Settings that follow you between devices (kept in step with sync.js SYNCED_SETTINGS).
+export const SYNCED = ['newPerDay', 'earNewPerDay', 'retention', 'sessionMinutes', 'maxReviews', 'noTyping', 'speaking',
+  'tutorModel', 'sttModel', 'coachModel', 'tutorShowEn', 'handsFreePause',
+  'herPack', 'herName', 'herFamily', 'revealDate', 'revealMessage', 'pocketHide', 'walkPause'];
+const syncedJson = (s) => JSON.stringify(SYNCED.map((k) => s[k]));
+let lastSynced = '';
+
 export async function load() {
-  const [cards, settings, stats, seen, custom, novela] = await Promise.all([
+  const [cards, settings, stats, seen, custom, novela, deleted] = await Promise.all([
     run('cards', 'readonly', (s) => s.getAll()),
     run('meta', 'readonly', (s) => s.get('settings')),
     run('meta', 'readonly', (s) => s.get('stats')),
     run('meta', 'readonly', (s) => s.get('seenLessons')),
     run('meta', 'readonly', (s) => s.get('custom')),
     run('meta', 'readonly', (s) => s.get('novela')),
+    run('meta', 'readonly', (s) => s.get('deleted')),
   ]);
   state.cards = new Map((cards || []).map((c) => [c.id, c]));
   state.settings = { ...DEFAULT_SETTINGS, ...(settings || {}) };
@@ -90,6 +104,17 @@ export async function load() {
   state.seenLessons = new Set(seen || []);
   state.custom = custom || [];
   state.novela = novela || [];
+  state.deleted = deleted || [];
+  lastSynced = syncedJson(state.settings);
+}
+
+export function saveDeleted() {
+  return run('meta', 'readwrite', (s) => s.put(state.deleted, 'deleted'));
+}
+
+/** Replace the seen-lessons list (used by sync). */
+export function saveSeenLessons() {
+  return run('meta', 'readwrite', (s) => s.put([...state.seenLessons], 'seenLessons'));
 }
 
 export function saveCustom() {
@@ -111,7 +136,13 @@ export function saveCard(card) {
   return run('cards', 'readwrite', (s) => s.put(card));
 }
 
-export function saveSettings() {
+export function saveSettings({ fromSync = false } = {}) {
+  // Note when a setting that syncs changed, so the newest choice wins across devices
+  const now = syncedJson(state.settings);
+  if (now !== lastSynced) {
+    if (!fromSync) state.settings.settingsAt = Date.now();
+    lastSynced = now;
+  }
   return run('meta', 'readwrite', (s) => s.put(state.settings, 'settings'));
 }
 
@@ -153,9 +184,10 @@ export function exportData() {
   return JSON.stringify({
     app: 'portugues', version: 1, exported: new Date().toISOString(),
     cards: [...state.cards.values()],
-    settings: { ...state.settings, apiKey: '' }, // never put the API key in a backup file
+    // never put the API key or GitHub token in a backup file
+    settings: { ...state.settings, apiKey: '', syncToken: '', syncGistId: '', syncAt: 0 },
     stats: state.stats, seenLessons: [...state.seenLessons],
-    custom: state.custom, novela: state.novela,
+    custom: state.custom, novela: state.novela, deleted: state.deleted,
   });
 }
 
@@ -163,12 +195,14 @@ export async function importData(json) {
   const data = JSON.parse(json);
   if (data.app !== 'portugues' || !Array.isArray(data.cards)) throw new Error('Not a backup file from this app.');
   await run('cards', 'readwrite', (s) => { s.clear(); data.cards.forEach((c) => s.put(c)); });
-  state.settings = { ...DEFAULT_SETTINGS, ...data.settings, apiKey: state.settings.apiKey };
+  const keep = { apiKey: state.settings.apiKey, syncToken: state.settings.syncToken, syncGistId: state.settings.syncGistId, syncAt: state.settings.syncAt };
+  state.settings = { ...DEFAULT_SETTINGS, ...data.settings, ...keep };
+  state.deleted = data.deleted || [];
   state.stats = { days: {}, recent: [], ...data.stats };
   state.seenLessons = new Set(data.seenLessons || []);
   state.custom = data.custom || [];
   state.novela = data.novela || [];
-  await Promise.all([saveSettings(), saveStats(), saveCustom(), saveNovela(),
+  await Promise.all([saveSettings(), saveStats(), saveCustom(), saveNovela(), saveDeleted(),
     run('meta', 'readwrite', (s) => s.put([...state.seenLessons], 'seenLessons'))]);
   await load();
 }

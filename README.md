@@ -85,6 +85,21 @@ One-time setup:
 
 Times are set in `.github/workflows/pocket-quiz.yml`: around 08:00, 12:00 and 17:30 UTC, plus a random delay of up to 90 minutes. If the repo has had no activity for 45 days, the workflow makes an empty commit, because GitHub pauses scheduled workflows after 60 quiet days.
 
+## Sync between phone and tablet
+
+Under **Settings → Sync between devices**, paste a GitHub token on each device. The first device creates a **secret gist** called "Daily sync" on your account. Other devices find it by themselves and merge into it.
+
+- **Merging:**
+  - For each word, the most recent review wins.
+  - Day counters take the larger of the two devices' figures.
+  - Your own words, Novela episodes and best scores are combined.
+  - Settings use the most recent change. A device joining for the first time takes the synced settings.
+- **When it syncs:** when you open the app, after each session, when you leave the app, or with **Sync now**.
+- **Never synced:** your OpenRouter key, your GitHub token and your voice choice.
+- **Privacy:** secret gists don't appear on your profile or in search, but they aren't encrypted. Anyone with the exact link could read yours.
+
+To make the token: go to github.com → Settings → Developer settings → Personal access tokens → **Fine-grained tokens** → Generate. Give it only the **Gists: Read and write** permission.
+
 ## Your data
 
 Your progress is stored only on your phone (in IndexedDB). It is never put in this repository. Use **Settings → Export backup** now and then.
@@ -110,4 +125,5 @@ Don't commit API keys to this repository: it's public. The app keeps your OpenRo
 | `js/novela.js`, `js/walk.js`, `js/games.js`, `js/numbers.js` | Novela, Walk mode, games, numbers in words |
 | `js/pocket.js`, `scripts/push.mjs`, `.github/workflows/pocket-quiz.yml` | Pocket quizzes: device side, push sender, schedule |
 | `js/store.js` | IndexedDB storage, backup and restore |
+| `js/sync.js` | Sync between devices through a secret GitHub Gist |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline support and installability |

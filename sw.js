@@ -1,6 +1,6 @@
 // Service worker: network-first (so updates show up straight away), cache fallback for offline.
 // Also runs pocket quizzes: notifications you can answer without opening the app.
-const CACHE = 'daily-v5';
+const CACHE = 'daily-v6';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
   'js/app.js', 'js/content.js', 'js/content-a1.js', 'js/content-a2.js', 'js/content-her.js',
@@ -8,7 +8,7 @@ const SHELL = [
   'js/session.js', 'js/speech.js', 'js/store.js',
   'js/openrouter.js', 'js/pronounce.js', 'js/recorder.js',
   'js/scenarios.js', 'js/talk.js', 'js/tutor.js',
-  'js/pocket.js', 'js/extras.js', 'js/games.js', 'js/novela.js', 'js/walk.js', 'js/numbers.js',
+  'js/pocket.js', 'js/extras.js', 'js/games.js', 'js/novela.js', 'js/walk.js', 'js/numbers.js', 'js/sync.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/badge-96.png',
 ];
 

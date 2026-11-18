@@ -254,6 +254,8 @@ function wireMyList(app, d) {
     d.state.custom = d.state.custom.filter((x) => x.id !== id);
     unregisterCustom(id);
     await d.store.saveCustom();
+    d.state.deleted = [...(d.state.deleted || []), id]; // so sync doesn't bring it back
+    await d.store.saveDeleted();
     if (d.state.cards.has(id)) await d.store.deleteCard(id);
     d.rerender();
   }));

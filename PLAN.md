@@ -150,6 +150,11 @@ Content is written for **Portugal**: *tu* for friends and *você* or *o senhor/a
    - **A Novela:** a daily AI episode built from the words you know plus 2–3 upcoming ones, as comprehensible input. Tap any word for its meaning or to add it. There's a comprehension question, and it unlocks at 40 words.
    - **Walk mode:** an earphone drill. You hear the English, have a pause to say it, then hear the Portuguese twice. Weakest words come first and each one repeats. The screen stays on, dimmed to black.
    - **Games:** Blitz (match pairs), Ear rush (hear and pick) and Números (numbers, prices and phone numbers by ear). All are 60 seconds with combos and best scores.
+6. **Sync (status: done, v0.6):**
+   - Phone and tablet stay in step through a secret GitHub Gist, using a fine-grained token with only the Gists permission.
+   - Progress is merged, not overwritten: the newest review wins for each word, and day counters take the larger figure.
+   - It syncs on open, after sessions and on leaving the app.
+   - Keys, the token and the voice choice stay on each device.
 
 ---
 
