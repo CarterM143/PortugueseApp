@@ -122,7 +122,8 @@ Content is written for **Portugal**: *tu* for friends and *você* or *o senhor/a
    - Units 1–5 and the ear-training basics.
    - Multiple choice, tiles, cloze, typing and dictation, with phone TTS and forgiving marking.
    - Deployed to GitHub Pages and tested on your phone.
-2. **Phase 2, speaking:** recording, Whisper transcription, tiered pronunciation feedback, slow playback, shadowing and the recurring-error drills.
+   **Status: done (v0.1).**
+2. **Phase 2, speaking (status: done, v0.2):** two speech engines. OpenRouter Whisper large-v3 (open-weight, uses your key) or the phone's own recogniser (free, no key). There's a pronunciation coach on an open-weight audio model (Voxtral Small by default). Ladder rungs 6–7 are speaking ("listen and say it", "say the translation"), mixed with typing. Marking uses European Portuguese sound-alike matching in three tiers, retries, an "I said it right" self-grade, and playback of your own recording. Repeated sound problems pull matching ear training forward. Originally planned as: recording, Whisper transcription, tiered pronunciation feedback, slow playback, shadowing and the recurring-error drills.
 3. **Phase 3, AI tutor:** role-plays, the prompt-first correction ladder, "Help me say it", hands-free mode and AI-generated extra sentences.
 4. **Phase 4, depth:** units 6–20, stats such as retention and forecast, and settings for the retention target, daily new-item cap and session length.
 

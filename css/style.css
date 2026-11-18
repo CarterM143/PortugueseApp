@@ -184,6 +184,26 @@ a { color: var(--accent); }
 table.conj { border-collapse: collapse; margin: 8px 0; }
 table.conj td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--border); }
 
+/* speaking */
+.tag.speak { background: var(--bad-soft); color: var(--bad); }
+.mic-area { display: grid; justify-items: center; gap: 8px; margin: 18px 0 8px; text-align: center; }
+.mic {
+  width: 96px; height: 96px; border-radius: 50%; border: none; cursor: pointer;
+  background: var(--accent); color: var(--accent-ink); display: grid; place-items: center;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
+}
+.mic svg { width: 44px; height: 44px; fill: currentColor; }
+.mic.recording { background: var(--bad); color: #fff; animation: pulse 1.2s ease-in-out infinite; }
+.mic.busy { opacity: 0.6; animation: none; }
+.mic:disabled { opacity: 0.35; cursor: default; }
+@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgb(220 38 38 / 45%); } 50% { box-shadow: 0 0 0 16px rgb(220 38 38 / 0%); } }
+.heard { border-radius: 12px; padding: 12px; margin: 10px 0; }
+.heard.close { background: var(--close-soft); }
+.heard.unclear { background: var(--bad-soft); }
+.coach-out ul { margin: 6px 0; padding-left: 20px; }
+ul.sounds { margin: 0; padding-left: 18px; }
+ul.sounds li { margin: 4px 0; }
+
 /* feedback sheet */
 .feedback {
   position: sticky; bottom: 0; margin: 0 -16px; padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
@@ -230,6 +250,7 @@ table.conj td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--border);
 .form label { display: block; margin: 12px 0 4px; font-weight: 600; }
 .form label output { float: right; color: var(--accent); }
 .form input[type="range"] { width: 100%; accent-color: var(--accent); }
+.form input[type="text"], .form input[type="password"] { width: 100%; font: inherit; font-weight: 400; padding: 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); margin-top: 4px; }
 .form select { width: 100%; font: inherit; padding: 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); margin-top: 4px; }
 .form .switch { display: flex; gap: 10px; align-items: center; font-weight: 500; }
 .form .switch input { width: 22px; height: 22px; accent-color: var(--accent); }

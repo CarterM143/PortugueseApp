@@ -4,21 +4,99 @@ import * as store from './store.js';
 import { state } from './store.js';
 import { initSpeech, speak, speechAvailable, hasPtPtVoice, portugueseVoices, chosenVoice, stopSpeaking } from './speech.js';
 import { UNITS, EAR, ITEM_BY_ID } from './content.js';
-import { Session, buildQueue, chooseExercise, easierExercise, counts } from './session.js';
+import { Session, buildQueue, chooseExercise, easierExercise, counts, MAX_RUNG, MAX_RUNG_SILENT } from './session.js';
 import { renderExercise, esc, ICON, stressMarkup } from './exercises.js';
 import { diffWords } from './grade.js';
 import { dayNumber } from './fsrs.js';
+import { AudioCapture, PhoneRecognition, micAvailable, phoneRecognitionAvailable } from './recorder.js';
+import { transcribe, coachPronunciation, keyInfo, COACH_SUGGESTIONS, DEFAULT_MODELS } from './openrouter.js';
+import { assessSpeech, soundFeatures, SOUND_FEATURES } from './pronounce.js';
 
 const app = document.getElementById('app');
 const nav = document.getElementById('nav');
 let session = null;
+let activeCapture = null;
 
 const say = (text, opts) => speak(text, state.settings, opts);
+
+// ---------------- speech recognition ----------------
+
+/** Which recogniser to use: 'openrouter' | 'phone' | null */
+function sttEngine() {
+  const s = state.settings;
+  const or = !!s.apiKey && micAvailable();
+  const phone = phoneRecognitionAvailable();
+  if (s.sttEngine === 'openrouter') return or ? 'openrouter' : null;
+  if (s.sttEngine === 'phone') return phone ? 'phone' : null;
+  return or ? 'openrouter' : phone ? 'phone' : null;
+}
+
+const speakingEnabled = () => state.settings.speaking && !!sttEngine() && navigator.onLine !== false;
+
+function makeListener() {
+  const engine = sttEngine();
+  let cap = null;
+  return {
+    engine,
+    async start() {
+      cap = engine === 'openrouter' ? new AudioCapture() : new PhoneRecognition('pt-PT');
+      activeCapture = cap;
+      try {
+        await cap.start();
+      } catch (err) {
+        cap = null;
+        activeCapture = null;
+        if (err?.name === 'NotAllowedError') throw new Error('Microphone permission was denied. Allow it in Chrome: ⋮ → Settings → Site settings → Microphone.');
+        throw err;
+      }
+    },
+    async stop() {
+      const c = cap;
+      cap = null;
+      activeCapture = null;
+      if (!c) return { transcripts: [], audio: null };
+      const res = await c.stop();
+      if (engine === 'phone') return { transcripts: res.transcripts, audio: null };
+      if (!res.audio) return { transcripts: [], audio: null };
+      const text = await transcribe(state.settings.apiKey, res.audio.b64, { model: state.settings.sttModel || DEFAULT_MODELS.stt });
+      return { transcripts: text ? [text] : [], audio: res.audio };
+    },
+    cancel() {
+      cap?.cancel();
+      cap = null;
+      activeCapture = null;
+    },
+  };
+}
+
+/** Count which tricky sounds keep going wrong; every 3rd miss pulls related ear training forward. */
+async function noteSoundErrors(missed) {
+  const feats = soundFeatures(missed || []);
+  if (!feats.length) return;
+  const sounds = (state.stats.sounds ||= {});
+  const boosted = [];
+  for (const f of feats) {
+    sounds[f] = (sounds[f] || 0) + 1;
+    if (sounds[f] % 3 === 0) {
+      const feat = SOUND_FEATURES.find((x) => x.id === f);
+      let any = false;
+      for (const id of feat.ear) {
+        const c = state.cards.get(id);
+        if (c && c.due > dayNumber()) { await store.saveCard({ ...c, due: dayNumber() }); any = true; }
+      }
+      if (any) boosted.push(feat.label);
+    }
+  }
+  await store.saveStats();
+  if (boosted.length) toast(`Extra ear practice added for ${boosted.join(', ')}`);
+}
 
 // ---------------- routing ----------------
 
 function route() {
   const [view, arg] = location.hash.replace(/^#\/?/, '').split('/');
+  activeCapture?.cancel();
+  activeCapture = null;
   if (view !== 'session') { stopSpeaking(); }
   nav.hidden = view === 'session';
   nav.querySelectorAll('a').forEach((a) => a.classList.toggle('active', a.getAttribute('href') === `#/${view || 'home'}`));
@@ -76,10 +154,23 @@ function renderHome() {
       <h2>Progress</h2>
       <p>${c.learned} of ${UNITS.reduce((n, u) => n + u.items.length, 0)} words and phrases started.</p>
       <p class="muted small">Your reviews are scheduled to keep each item at about ${Math.round(state.settings.retention * 100)}% recall.</p>
-    </section>`;
+      <p class="muted small">🎤 Speaking: ${speakingEnabled()
+        ? `on (${sttEngine() === 'openrouter' ? 'OpenRouter Whisper' : 'phone recogniser'})`
+        : state.settings.speaking ? 'no speech engine available. Add an OpenRouter key in Settings, or use Chrome on Android.' : 'off'}</p>
+    </section>
+    ${soundsCard()}`;
   app.querySelector('[data-act="start"]')?.addEventListener('click', () => startSession());
   app.querySelector('[data-act="practice"]')?.addEventListener('click', () => startSession({ practice: true }));
   app.querySelector('[data-act="more"]')?.addEventListener('click', () => startSession({ extraNew: 5 }));
+}
+
+function soundsCard() {
+  const top = Object.entries(state.stats.sounds || {}).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  if (!top.length) return '';
+  return `<section class="card"><h2>Sounds to work on</h2><ul class="sounds">${top.map(([id, n]) => {
+    const f = SOUND_FEATURES.find((x) => x.id === id);
+    return f ? `<li>${esc(f.label)} <span class="chip learning">${n}×</span></li>` : '';
+  }).join('')}</ul><p class="muted small">From your speaking exercises. Related ear training is brought forward automatically.</p></section>`;
 }
 
 async function startSession(opts = {}) {
@@ -87,7 +178,7 @@ async function startSession(opts = {}) {
   const today = store.todayStats();
   const queue = buildQueue(state, today, opts);
   if (!queue.length) { toast('Nothing to practise yet. Learn some new words first.'); return; }
-  session = new Session(store, queue);
+  session = new Session(store, queue, { maxRung: speakingEnabled() ? MAX_RUNG : MAX_RUNG_SILENT });
   go('session');
 }
 
@@ -115,16 +206,24 @@ function renderSession() {
   });
 
   const root = app.querySelector('.exercise');
-  let type = chooseExercise(item, card, entry.mode, state, { canListen: speechAvailable() });
+  const canSpeak = speakingEnabled() && !session.noSpeak;
+  let type = chooseExercise(item, card, entry.mode, state, { canListen: speechAvailable(), canSpeak });
 
   const ctx = {
     settings: state.settings,
     rand: Math.random,
     speak: (text, opts) => say(text, opts),
+    stopSpeaking,
     speakWord: null,
+    listen: makeListener(),
+    assess: assessSpeech,
     done: (result, info = {}) => onResult(result, info, item, entry, type),
-    switchTo: () => {
-      type = easierExercise(item, type);
+    switchTo: (why) => {
+      if (why === 'nospeak') {
+        session.noSpeak = true;
+        toast('Speaking paused for the rest of this session');
+      }
+      type = easierExercise(item, type, { noTyping: state.settings.noTyping });
       renderExercise(type, root, { item, card, entry }, ctx);
     },
   };
@@ -137,6 +236,7 @@ async function onResult(result, info, item, entry, type) {
     return renderSession();
   }
   await session.answer(result);
+  if (info.spoken && !info.selfGraded && info.missed?.length) noteSoundErrors(info.missed);
   showFeedback(result, info, item, type);
 }
 
@@ -164,12 +264,22 @@ function showFeedback(result, info, item, type) {
       typo: `You wrote "${esc(info.input)}". Just a small slip.`,
       hint: 'Counted as partly correct because you used a hint.',
     }[info.reason] || (result === 'wrong' && info.input ? `You wrote "${esc(info.input)}".` : '');
+    const spoken = !info.spoken ? ''
+      : info.selfGraded ? '<p class="small">You marked this as said correctly. Trust your ear!</p>'
+        : info.dunno ? ''
+          : `<p class="small">I heard: <b>“${esc(info.heard || '…')}”</b></p>`;
+    const coachUI = info.spoken && info.audio ? `
+      <div class="row">
+        <button class="btn small" data-act="my-audio">${ICON.play} My recording</button>
+        ${state.settings.apiKey ? '<button class="btn small" data-act="coach">🧑‍🏫 Pronunciation tips</button>' : ''}
+      </div><div class="coach-out small"></div>` : '';
     detail = `
       <div class="fb-answer"><span class="pt">${shown}</span>
         <button class="icon-btn inline" data-act="play" aria-label="Play">${ICON.play}</button>
         <button class="icon-btn inline" data-act="slow" aria-label="Play slowly">${ICON.slow}</button></div>
       <div class="en">${esc(item.en)}</div>
       ${why ? `<p class="small">${why}</p>` : ''}
+      ${spoken}${coachUI}
       ${item.note ? `<p class="note">${esc(item.note)}</p>` : ''}`;
   } else if (item.kind === 'pair') {
     detail = `<p>${info.heard ? 'You heard' : 'The answer is'} <b class="pt">${esc(info.target || '')}</b>.</p>
@@ -208,6 +318,27 @@ function showFeedback(result, info, item, type) {
     const v = fb.querySelector('textarea').value.trim();
     const c = state.cards.get(item.id);
     if (c) { await store.saveCard({ ...c, hook: v || undefined }); toast('Saved'); }
+  });
+  fb.querySelector('[data-act="my-audio"]')?.addEventListener('click', () => {
+    const url = URL.createObjectURL(info.audio.blob);
+    const a = new Audio(url);
+    a.onended = () => URL.revokeObjectURL(url);
+    a.play();
+  });
+  fb.querySelector('[data-act="coach"]')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    const out = fb.querySelector('.coach-out');
+    btn.disabled = true;
+    out.textContent = 'Listening to your recording…';
+    try {
+      const r = await coachPronunciation(state.settings.apiKey, info.audio.b64, info.answer || item.pt, { model: state.settings.coachModel || DEFAULT_MODELS.coach });
+      const verdict = { good: '✅ Sounds good', close: '🟡 Nearly there', unclear: '🔴 Hard to make out' }[r.verdict] || '';
+      out.innerHTML = `${verdict ? `<p><b>${verdict}</b>${r.heard ? ` (heard “${esc(r.heard)}”)` : ''}</p>` : ''}
+        ${(r.tips || []).length ? `<ul>${r.tips.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}`;
+    } catch (err) {
+      out.textContent = err.message;
+      btn.disabled = false;
+    }
   });
   const cont = fb.querySelector('[data-act="continue"]');
   cont.addEventListener('click', () => renderSession());
@@ -316,6 +447,33 @@ function renderSettings() {
       <button class="btn" data-act="test">${ICON.play} Test: "Bom dia, tudo bem?"</button>
     </section>
     <section class="card form">
+      <h2>Speaking &amp; AI</h2>
+      <label class="switch"><input type="checkbox" name="speaking" ${s.speaking ? 'checked' : ''}> Speaking exercises</label>
+      <label>Speech recognition
+        <select name="sttEngine">
+          <option value="auto" ${s.sttEngine === 'auto' ? 'selected' : ''}>Automatic</option>
+          <option value="openrouter" ${s.sttEngine === 'openrouter' ? 'selected' : ''}>OpenRouter: Whisper (uses your key)</option>
+          <option value="phone" ${s.sttEngine === 'phone' ? 'selected' : ''}>Phone's recogniser (free)</option>
+        </select></label>
+      <p class="muted small" data-out="engine"></p>
+      <label>OpenRouter API key
+        <input type="password" name="apiKey" value="${esc(s.apiKey)}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk-or-v1-…"></label>
+      <div class="row">
+        <button class="btn small" data-act="show-key">Show</button>
+        <button class="btn small" data-act="test-key">Test key</button>
+      </div>
+      <p class="small" data-out="key"></p>
+      <details>
+        <summary>Models</summary>
+        <label>Speech-to-text model <input type="text" name="sttModel" value="${esc(s.sttModel)}" autocapitalize="off" spellcheck="false"></label>
+        <label>Pronunciation coach model (must accept audio)
+          <input type="text" name="coachModel" value="${esc(s.coachModel)}" list="coach-models" autocapitalize="off" spellcheck="false"></label>
+        <datalist id="coach-models">${COACH_SUGGESTIONS.map(([id, label]) => `<option value="${esc(id)}">${esc(label)}</option>`).join('')}</datalist>
+        <p class="muted small">Open-weight models by default. Any OpenRouter model ID works. Suggestions: ${COACH_SUGGESTIONS.map(([, l]) => esc(l)).join(' · ')}.</p>
+      </details>
+      <p class="muted small">Your key is stored only on this phone and is never included in backups. Recordings go to OpenRouter only when it is the speech engine or when you ask for pronunciation tips. Tip: set a credit limit on the key at openrouter.ai → Settings → Keys.</p>
+    </section>
+    <section class="card form">
       <h2>Backup</h2>
       <p class="muted small">Your progress is stored only on this phone. Export a backup now and then.</p>
       <div class="row"><button class="btn" data-act="export">Export backup</button>
@@ -331,6 +489,46 @@ function renderSettings() {
     store.saveSettings();
   }));
   app.querySelector('[name="noTyping"]').addEventListener('change', (e) => { s.noTyping = e.target.checked; store.saveSettings(); });
+
+  const engineOut = app.querySelector('[data-out="engine"]');
+  const showEngine = () => {
+    const e = sttEngine();
+    engineOut.textContent = !s.speaking ? 'Speaking exercises are off.'
+      : e === 'openrouter' ? 'Using OpenRouter Whisper.'
+        : e === 'phone' ? "Using the phone's recogniser."
+          : s.sttEngine === 'openrouter' ? 'Add an API key to use OpenRouter.' : 'No speech recogniser available on this device.';
+  };
+  showEngine();
+  app.querySelector('[name="speaking"]').addEventListener('change', (e) => { s.speaking = e.target.checked; store.saveSettings(); showEngine(); });
+  app.querySelector('[name="sttEngine"]').addEventListener('change', (e) => { s.sttEngine = e.target.value; store.saveSettings(); showEngine(); });
+  ['apiKey', 'sttModel', 'coachModel'].forEach((name) => {
+    app.querySelector(`[name="${name}"]`).addEventListener('change', (e) => {
+      s[name] = e.target.value.trim() || (name === 'apiKey' ? '' : DEFAULT_MODELS[name === 'sttModel' ? 'stt' : 'coach']);
+      e.target.value = s[name];
+      store.saveSettings();
+      showEngine();
+    });
+  });
+  app.querySelector('[data-act="show-key"]').addEventListener('click', (e) => {
+    const inp = app.querySelector('[name="apiKey"]');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+    e.target.textContent = inp.type === 'password' ? 'Show' : 'Hide';
+  });
+  app.querySelector('[data-act="test-key"]').addEventListener('click', async () => {
+    const out = app.querySelector('[data-out="key"]');
+    s.apiKey = app.querySelector('[name="apiKey"]').value.trim();
+    await store.saveSettings();
+    showEngine();
+    out.textContent = 'Checking…';
+    try {
+      const k = await keyInfo(s.apiKey);
+      const used = typeof k.usage === 'number' ? `$${k.usage.toFixed(3)} used` : '';
+      const limit = k.limit != null ? ` of a $${k.limit} limit` : ' (no spending limit set: consider adding one)';
+      out.textContent = `✅ Key works. ${used}${limit}.`;
+    } catch (err) {
+      out.textContent = `❌ ${err.message}`;
+    }
+  });
   app.querySelector('[name="voiceURI"]')?.addEventListener('change', (e) => { s.voiceURI = e.target.value; store.saveSettings(); say('Olá! Bom dia.'); });
   app.querySelector('[data-act="test"]').addEventListener('click', () => say('Bom dia, tudo bem?'));
   app.querySelector('[data-act="export"]').addEventListener('click', () => {

@@ -13,6 +13,12 @@ export const DEFAULT_SETTINGS = {
   voiceURI: null,      // chosen pt-PT voice
   noTyping: false,     // tiles / choices instead of typing
   maxReviews: 120,     // safety cap per session
+  // Speaking & AI (Phase 2)
+  speaking: true,      // include speaking exercises when a speech engine is available
+  sttEngine: 'auto',   // auto | openrouter | phone
+  apiKey: '',          // OpenRouter key: stays on this device, never exported
+  sttModel: 'openai/whisper-large-v3',
+  coachModel: 'mistralai/voxtral-small-24b-2507',
 };
 
 let dbPromise;
@@ -111,7 +117,8 @@ export function exportData() {
   return JSON.stringify({
     app: 'portugues', version: 1, exported: new Date().toISOString(),
     cards: [...state.cards.values()],
-    settings: state.settings, stats: state.stats, seenLessons: [...state.seenLessons],
+    settings: { ...state.settings, apiKey: '' }, // never put the API key in a backup file
+    stats: state.stats, seenLessons: [...state.seenLessons],
   });
 }
 
@@ -119,7 +126,7 @@ export async function importData(json) {
   const data = JSON.parse(json);
   if (data.app !== 'portugues' || !Array.isArray(data.cards)) throw new Error('Not a backup file from this app.');
   await run('cards', 'readwrite', (s) => { s.clear(); data.cards.forEach((c) => s.put(c)); });
-  state.settings = { ...DEFAULT_SETTINGS, ...data.settings };
+  state.settings = { ...DEFAULT_SETTINGS, ...data.settings, apiKey: state.settings.apiKey };
   state.stats = { days: {}, recent: [], ...data.stats };
   state.seenLessons = new Set(data.seenLessons || []);
   await Promise.all([saveSettings(), saveStats(),

@@ -5,7 +5,8 @@ import { schedule, dayNumber, retrievability } from './fsrs.js';
 import { ratingFor } from './grade.js';
 import { UNITS, EAR, ITEM_BY_ID } from './content.js';
 
-export const MAX_RUNG = 5;
+export const MAX_RUNG = 7;        // with speaking
+export const MAX_RUNG_SILENT = 5; // without speaking
 const RECENT_WINDOW = 20;
 const DAY_MS = 86400000;
 
@@ -119,16 +120,18 @@ const wordCount = (s) => s.trim().split(/\s+/).length;
 /**
  * Pick the exercise type for an entry.
  * Rungs: 1 listen→meaning, 2 read→meaning / meaning→Portuguese, 3 tiles,
- *        4 dictation, 5 type the translation.
+ *        4 dictation, 5 type the translation, 6 listen & say it (shadowing),
+ *        7 say the translation. Rungs 6–7 mix in typing so both skills keep improving.
  */
-export function chooseExercise(item, card, mode, st, { canListen = true, rand = Math.random } = {}) {
+export function chooseExercise(item, card, mode, st, { canListen = true, canSpeak = false, rand = Math.random } = {}) {
   if (mode === 'lesson') return 'lesson';
   if (mode === 'intro') return item.kind === 'vocab' ? 'intro' : `intro-${item.kind}`;
   if (item.kind === 'pair') return canListen ? 'pair' : 'pair-read';
   if (item.kind === 'stress') return canListen ? 'stress' : 'stress-read';
 
+  const top = canSpeak ? MAX_RUNG : MAX_RUNG_SILENT;
   const base = card?.rung ?? 2;
-  let rung = mode === 'first' ? 2 : clamp(base + adaptiveOffset(st.stats.recent), 1, MAX_RUNG);
+  const rung = mode === 'first' ? 2 : clamp(base + adaptiveOffset(st.stats.recent), 1, top);
   const multi = wordCount(item.pt) >= 2;
   const noTyping = st.settings.noTyping;
 
@@ -137,26 +140,34 @@ export function chooseExercise(item, card, mode, st, { canListen = true, rand = 
     case 1: type = 'listen-mc'; break;
     case 2: type = rand() < 0.5 ? 'read-mc' : 'en-mc'; break;
     case 3: type = multi ? 'tiles' : 'en-mc'; break;
-    case 4: type = noTyping ? (multi ? 'tiles' : 'listen-mc') : 'dictation'; break;
-    default: type = noTyping ? (multi ? 'tiles' : 'en-mc') : 'type';
+    case 4: type = 'dictation'; break;
+    case 5: type = 'type'; break;
+    case 6: type = rand() < 0.6 ? 'speak-read' : 'dictation'; break;
+    default: type = rand() < 0.6 ? 'speak-translate' : 'type';
   }
-  if (!canListen && (type === 'listen-mc' || type === 'dictation')) type = type === 'dictation' ? 'type' : 'read-mc';
-  if (noTyping && type === 'type') type = multi ? 'tiles' : 'en-mc';
+  if (!canListen && type === 'listen-mc') type = 'read-mc';
+  if (!canListen && type === 'dictation') type = 'type';
+  if (noTyping && (type === 'type' || type === 'dictation')) {
+    type = canSpeak && rung >= 4 ? (type === 'dictation' ? 'speak-read' : 'speak-translate') : (multi ? 'tiles' : 'en-mc');
+  }
   return type;
 }
 
-/** Simpler, non-typing fallback for an exercise (the "too hard right now" button). */
-export function easierExercise(item, type) {
+/** Easier fallback ("can't type / can't speak right now" buttons). */
+export function easierExercise(item, type, { noTyping = false } = {}) {
   const multi = wordCount(item.pt) >= 2;
-  if (type === 'type' || type === 'dictation') return multi ? 'tiles' : 'en-mc';
+  const nonTyping = multi ? 'tiles' : 'en-mc';
+  if (type === 'speak-read') return noTyping ? 'listen-mc' : 'dictation';
+  if (type === 'speak-translate') return noTyping ? nonTyping : 'type';
+  if (type === 'type' || type === 'dictation') return nonTyping;
   if (type === 'tiles') return 'en-mc';
   return 'read-mc';
 }
 
-function nextRung(rung, result) {
-  if (result === 'correct' || result === 'accent') return clamp(rung + 1, 1, MAX_RUNG);
-  if (result === 'wrong') return clamp(rung - 1, 1, MAX_RUNG);
-  return rung;
+function nextRung(rung, result, top = MAX_RUNG) {
+  if (result === 'correct' || result === 'accent') return clamp(rung + 1, 1, top);
+  if (result === 'wrong') return clamp(Math.min(rung, top) - 1, 1, top);
+  return Math.min(rung, top);
 }
 
 // ---------- multiple-choice options ----------
@@ -207,11 +218,13 @@ export class Session {
   /**
    * @param store {state, saveCard, saveStats, todayStats, markLessonSeen}
    */
-  constructor(store, queue, { now = () => Date.now() } = {}) {
+  constructor(store, queue, { now = () => Date.now(), maxRung = MAX_RUNG } = {}) {
     this.store = store;
     this.queue = queue;
     this.pos = 0;
     this.now = now;
+    this.maxRung = maxRung;
+    this.noSpeak = false; // set when the learner taps "can't speak now"
     this.reasks = new Map();
     this.gradedToday = new Set();
     this.summary = { graded: 0, correct: 0, newItems: 0, mistakes: [] };
@@ -247,7 +260,7 @@ export class Session {
       this.gradedToday.add(e.id);
       const prev = state.cards.get(e.id) || { id: e.id, rung: 2 };
       const mem = schedule(prev, ratingFor(result), this.now(), { retention: state.settings.retention });
-      const card = { ...prev, ...mem, rung: nextRung(prev.rung ?? 2, result) };
+      const card = { ...prev, ...mem, rung: nextRung(prev.rung ?? 2, result, this.maxRung) };
       await this.store.saveCard(card);
 
       const today = this.store.todayStats();

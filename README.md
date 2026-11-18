@@ -35,6 +35,15 @@ The app uses your phone's own text-to-speech voice. To get the Portugal accent r
 
 Then pick that voice in the app's **Settings** screen.
 
+## Speaking (optional OpenRouter key)
+
+Speaking exercises work in either of two ways:
+
+- **Phone's recogniser (free):** Chrome on Android uses Google's speech recognition. No key is needed.
+- **OpenRouter:** add your key under **Settings → Speaking & AI**. Speech is transcribed by open-weight Whisper large-v3 (fractions of a cent per minute). With a key you also get **Pronunciation tips**, where an open-weight audio model (Voxtral Small) listens to your actual recording.
+
+Set a credit limit on the key at openrouter.ai → Settings → Keys, just in case.
+
 ## Your data
 
 Your progress is stored only on your phone (in IndexedDB). It is never put in this repository. Use **Settings → Export backup** now and then.

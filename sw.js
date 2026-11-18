@@ -1,9 +1,10 @@
 // Service worker: network-first (so updates show up straight away), cache fallback for offline.
-const CACHE = 'portugues-v1';
+const CACHE = 'portugues-v2';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
   'js/app.js', 'js/content.js', 'js/exercises.js', 'js/fsrs.js', 'js/grade.js',
   'js/session.js', 'js/speech.js', 'js/store.js',
+  'js/openrouter.js', 'js/pronounce.js', 'js/recorder.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png',
 ];
 

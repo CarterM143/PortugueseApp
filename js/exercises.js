@@ -287,6 +287,122 @@ function stressExercise(root, item, ctx, listen) {
 R.stress = (root, { item }, ctx) => stressExercise(root, item, ctx, true);
 R['stress-read'] = (root, { item }, ctx) => stressExercise(root, item, ctx, false);
 
+// ---------------- speaking ----------------
+
+const MIC = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+const STOP = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+
+function speakExercise(root, item, ctx, { read }) {
+  root.innerHTML = `<p class="tag speak">Speaking</p>
+    <p class="instr">${read ? 'Listen, then say it out loud' : 'Say it in Portuguese'}</p>
+    ${read
+      ? `<div class="prompt pt">${esc(item.pt)}</div>${audioButtons(true, false)}`
+      : `<div class="prompt">${esc(item.en)}</div>`}
+    <div class="mic-area">
+      <button class="mic" data-act="mic" aria-label="Start recording">${MIC}</button>
+      <p class="mic-status muted small">Tap the mic, speak, then tap again when you're done. Take your time.</p>
+    </div>
+    <div class="heard" hidden></div>
+    <div class="actions"><div class="row">
+      ${read ? '' : '<button class="btn ghost" data-act="dunno">I don\'t know</button>'}
+      <button class="btn ghost" data-act="easier">Can't speak now</button>
+    </div></div>`;
+  if (read) { wireAudio(root, ctx, item.pt); ctx.speak(item.pt); }
+
+  const mic = root.querySelector('[data-act="mic"]');
+  const status = root.querySelector('.mic-status');
+  const heardBox = root.querySelector('.heard');
+  let phase = 'idle'; // idle | recording | busy | finished
+  let attempts = 0;
+  let best = null; // best assessment so far
+
+  const finish = (result, extra = {}) => {
+    if (phase === 'finished') return;
+    phase = 'finished';
+    ctx.listen.cancel();
+    ctx.done(result, { spoken: true, heard: best?.heard || '', missed: best?.missed || [], answer: best?.answer || item.pt, audio: best?.audio, ...extra });
+  };
+
+  const showAttempt = (a) => {
+    heardBox.hidden = false;
+    const heardTxt = a.heard ? `I heard: <b class="pt">“${esc(a.heard)}”</b>` : "I didn't catch anything.";
+    if (a.tier === 'close') {
+      heardBox.className = 'heard close';
+      heardBox.innerHTML = `<p>${heardTxt}</p><p><b>Close!</b> Listen to it slowly, then try once more.</p>
+        <div class="row"><button class="btn small" data-act="slow-model">${ICON.slow} Hear it slowly</button>
+        <button class="btn small" data-act="accept">Continue</button></div>`;
+    } else {
+      heardBox.className = 'heard unclear';
+      heardBox.innerHTML = `<p>${heardTxt}</p><p>${attempts >= 3 ? "Let's move on: no penalty." : 'Not quite. Try again, or carry on another way:'}</p>
+        <div class="row">
+          <button class="btn small" data-act="slow-model">${ICON.slow} Hear it</button>
+          <button class="btn small" data-act="self">I said it right</button>
+          <button class="btn small" data-act="switch">Switch to typing</button>
+        </div>`;
+    }
+    heardBox.querySelector('[data-act="slow-model"]')?.addEventListener('click', () => ctx.speak(item.pt, { rate: ctx.settings.slowRate }));
+    heardBox.querySelector('[data-act="accept"]')?.addEventListener('click', () => finish('almost'));
+    heardBox.querySelector('[data-act="self"]')?.addEventListener('click', () => finish('correct', { selfGraded: true }));
+    heardBox.querySelector('[data-act="switch"]')?.addEventListener('click', () => { phase = 'finished'; ctx.listen.cancel(); ctx.switchTo('easier'); });
+    if (attempts >= 3) mic.disabled = true;
+  };
+
+  mic.addEventListener('click', async () => {
+    if (phase === 'busy' || phase === 'finished') return;
+    if (phase === 'idle') {
+      try {
+        ctx.stopSpeaking?.();
+        await ctx.listen.start();
+      } catch (err) {
+        status.textContent = err.message || 'Could not start the microphone.';
+        return;
+      }
+      phase = 'recording';
+      mic.classList.add('recording');
+      mic.innerHTML = STOP;
+      mic.setAttribute('aria-label', 'Stop recording');
+      status.textContent = 'Listening… tap when you\'ve finished.';
+      return;
+    }
+    // stop
+    phase = 'busy';
+    mic.classList.remove('recording');
+    mic.classList.add('busy');
+    status.textContent = 'Checking…';
+    let res;
+    try {
+      res = await ctx.listen.stop();
+    } catch (err) {
+      phase = 'idle';
+      mic.classList.remove('busy');
+      mic.innerHTML = MIC;
+      status.textContent = `${err.message} Tap to try again, or use "Can't speak now".`;
+      return;
+    }
+    attempts++;
+    mic.classList.remove('busy');
+    mic.innerHTML = MIC;
+    const a = { ...ctx.assess(res.transcripts, answers(item)), audio: res.audio };
+    if (!best || a.score >= best.score) best = a;
+    if (best.tier === 'understood') return finish('correct');
+    if (attempts >= 2 && best.tier === 'close') return finish('almost');
+    phase = 'idle';
+    status.textContent = attempts >= 3 ? '' : 'Tap the mic to try again.';
+    showAttempt(best);
+  });
+
+  root.querySelector('[data-act="easier"]').addEventListener('click', () => {
+    if (phase === 'finished') return;
+    phase = 'finished';
+    ctx.listen.cancel();
+    ctx.switchTo('nospeak');
+  });
+  root.querySelector('[data-act="dunno"]')?.addEventListener('click', () => finish('wrong', { dunno: true }));
+}
+
+R['speak-read'] = (root, { item }, ctx) => speakExercise(root, item, ctx, { read: true });
+R['speak-translate'] = (root, { item }, ctx) => speakExercise(root, item, ctx, { read: false });
+
 R.lesson = (root, { entry }, ctx) => {
   const lesson = LESSON_BY_ID.get(entry.lessonId);
   root.innerHTML = `<p class="tag grammar">Grammar</p><h2>${esc(lesson.title)}</h2>

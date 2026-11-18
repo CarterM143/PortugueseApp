@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { schedule, Rating, intervalFor, dayNumber, retrievability } from '../js/fsrs.js';
 import { grade, normalize, stripAccents, diffWords } from '../js/grade.js';
 import { UNITS, EAR, ALL_ITEMS, LESSON_BY_ID } from '../js/content.js';
-import { buildQueue, chooseExercise, distractors, tilesFor, Session, counts, adaptiveOffset } from '../js/session.js';
+import { buildQueue, chooseExercise, easierExercise, distractors, tilesFor, Session, counts, adaptiveOffset } from '../js/session.js';
+import { assessSpeech, phoneticKey, spokenText, soundFeatures, SOUND_FEATURES } from '../js/pronounce.js';
+import { parseJsonReply } from '../js/openrouter.js';
 
 const DAY = 86400000;
 
@@ -201,4 +203,84 @@ test('chooseExercise respects no-typing and missing voice', () => {
   }
   assert.equal(chooseExercise(item, { rung: 5 }, 'review', st2.state), 'type');
   assert.equal(chooseExercise(EAR[0], {}, 'review', st2.state), 'pair');
+});
+
+// ---------- speaking ----------
+
+test('speech: exact and recogniser-style transcripts are understood', () => {
+  assert.equal(assessSpeech(['Bom dia.'], ['bom dia']).tier, 'understood');
+  assert.equal(assessSpeech(['Queria um café, por favor.'], ['queria um café, por favor']).tier, 'understood');
+  assert.equal(assessSpeech(['5 €'], ['cinco euros']).tier, 'understood');
+  assert.equal(assessSpeech(['16'], ['dezasseis']).tier, 'understood');
+  assert.equal(assessSpeech(['Chamo-me Ana'], ['chamo-me Ana']).tier, 'understood');
+  // sound-alike spellings
+  assert.equal(assessSpeech(['obrigadu'], ['obrigado']).tier, 'understood');
+});
+
+test('speech: near misses are close, wrong things are unclear', () => {
+  assert.equal(assessSpeech(['queria um cafe por'], ['queria um café, por favor']).tier, 'close');
+  assert.equal(assessSpeech(['pau'], ['pão']).tier, 'close');
+  assert.equal(assessSpeech(['the weather is nice'], ['bom dia']).tier, 'unclear');
+  assert.equal(assessSpeech([], ['bom dia']).tier, 'unclear');
+  assert.equal(assessSpeech([''], ['bom dia']).tier, 'unclear');
+});
+
+test('speech: best of several alternatives counts', () => {
+  const r = assessSpeech(['bomb dia tudo', 'bom dia'], ['bom dia']);
+  assert.equal(r.tier, 'understood');
+  assert.equal(r.heard, 'bom dia');
+});
+
+test('speech: missed words reveal the tricky sounds', () => {
+  const r = assessSpeech(['o pau'], ['o pão']);
+  assert.deepEqual(r.missed, ['pão']);
+  assert.ok(soundFeatures(r.missed).includes('nasal'));
+  assert.ok(soundFeatures(['avó']).includes('open-closed'));
+  assert.ok(soundFeatures(['filho']).includes('lh-nh'));
+  for (const f of SOUND_FEATURES) for (const id of f.ear) assert.ok(id.startsWith('ear-') || id.startsWith('stress-'));
+  assert.ok(SOUND_FEATURES.find((f) => f.id === 'nasal').ear.length === 2);
+});
+
+test('phonetic key merges sound-alike spellings', () => {
+  assert.equal(phoneticKey('cinco'), phoneticKey('sinco'));
+  assert.equal(phoneticKey('açúcar'), phoneticKey('assucar'));
+  assert.equal(spokenText('21'), 'vinte e um');
+});
+
+test('speaking exercises appear only on high rungs and when allowed', () => {
+  const st = fakeStore();
+  const item = UNITS[0].items.find((i) => i.pt === 'bom dia');
+  const seen = new Set();
+  for (let i = 0; i < 200; i++) seen.add(chooseExercise(item, { rung: 7 }, 'review', st.state, { canSpeak: true }));
+  assert.ok(seen.has('speak-translate') && seen.has('type'));
+  for (let i = 0; i < 50; i++) {
+    const t = chooseExercise(item, { rung: 7 }, 'review', st.state, { canSpeak: false });
+    assert.ok(!t.startsWith('speak'));
+  }
+  for (let r = 1; r <= 5; r++) assert.ok(!chooseExercise(item, { rung: r }, 'review', st.state, { canSpeak: true }).startsWith('speak') || r >= 6);
+  // no-typing + speaking: typing rungs become speaking
+  const nt = fakeStore({ noTyping: true });
+  const t5 = chooseExercise(item, { rung: 5 }, 'review', nt.state, { canSpeak: true });
+  assert.equal(t5, 'speak-translate');
+  assert.equal(easierExercise(item, 'speak-translate'), 'type');
+  assert.equal(easierExercise(item, 'speak-translate', { noTyping: true }), 'tiles');
+});
+
+test('rung never exceeds the session maximum', async () => {
+  const st = fakeStore({ newPerDay: 1, earNewPerDay: 0 });
+  const s = new Session(st, buildQueue(st.state, st.today), { maxRung: 5 });
+  while (!s.done) {
+    const e = s.current;
+    if (e.mode === 'lesson' || e.mode === 'intro') await s.acknowledge(); else await s.answer('correct');
+  }
+  const c = [...st.state.cards.values()][0];
+  c.rung = 5;
+  const s2 = new Session(st, [{ id: c.id, mode: 'review' }], { maxRung: 5 });
+  await s2.answer('correct');
+  assert.equal(st.state.cards.get(c.id).rung, 5);
+});
+
+test('parseJsonReply tolerates chatter around JSON', () => {
+  assert.deepEqual(parseJsonReply('Sure! {"verdict":"good","tips":[]} hope that helps'), { verdict: 'good', tips: [] });
+  assert.equal(parseJsonReply('no json here'), null);
 });
