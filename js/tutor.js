@@ -29,7 +29,7 @@ const LEVEL_GUIDE = {
 
 export function systemPrompt(scenario, known) {
   const knownList = known.slice(-200).join('; ');
-  const level = levelOf(scenario.unit);
+  const level = scenario.level || levelOf(scenario.unit);
   return `You are a friendly tutor helping a beginner practise EUROPEAN Portuguese (Portugal, NOT Brazil) through a short role-play.
 
 SCENARIO: ${scenario.setting}
@@ -128,7 +128,7 @@ export class AiConversation {
 
   async helpMeSay(english) {
     const raw = await this.chatFn(this.key, [
-      { role: 'system', content: `You help an ${levelOf(this.scenario.unit)} learner of EUROPEAN Portuguese (Portugal). Scenario: ${this.scenario.setting} They are talking to: ${this.scenario.role}` },
+      { role: 'system', content: `You help an ${this.scenario.level || levelOf(this.scenario.unit)} learner of EUROPEAN Portuguese (Portugal). Scenario: ${this.scenario.setting} They are talking to: ${this.scenario.role}` },
       { role: 'user', content: `How do I say this, as simply as possible, in European Portuguese? "${english}"\nReply with JSON only: {"pt": "<Portuguese>", "en": "<literal English back-translation>", "note": "<optional one-line tip, or empty>"}` },
     ], { model: this.model, temperature: 0.2, max_tokens: 200, json: true });
     const j = parseJsonReply(raw);

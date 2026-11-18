@@ -6,3 +6,5 @@ Thumbs.db
 # never commit backups or keys
 portugues-backup-*.json
 .env
+daily-backup-*.json
+.secrets/

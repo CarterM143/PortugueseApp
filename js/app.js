@@ -3,8 +3,13 @@
 import * as store from './store.js';
 import { state } from './store.js';
 import { initSpeech, speak, speechAvailable, hasPtPtVoice, portugueseVoices, chosenVoice, stopSpeaking } from './speech.js';
-import { UNITS, EAR, ITEM_BY_ID } from './content.js';
+import { UNITS, EAR, ITEM_BY_ID, HER, MINE, registerCustom } from './content.js';
 import { Session, buildQueue, chooseExercise, easierExercise, counts, estimateMinutes, MAX_RUNG, MAX_RUNG_SILENT } from './session.js';
+import { pocketUpdates, takeAnswers, syncPocket, pushSupported, currentSubscription, subscribe, unsubscribe, testPocket } from './pocket.js';
+import { renderReveal, renderCapture, setShared, daysUntil } from './extras.js';
+import { renderNovela } from './novela.js';
+import { renderWalk } from './walk.js';
+import { renderGames, renderGame } from './games.js';
 import { renderStats } from './stats.js';
 import { levelOf } from './content.js';
 import { renderExercise, esc, ICON, stressMarkup } from './exercises.js';
@@ -101,7 +106,7 @@ async function noteSoundErrors(missed) {
 let talkCleanup = null;
 
 function talkDeps() {
-  return { state, store, say, stopSpeaking, makeListener, sttEngine, toast, go };
+  return { state, store, say, stopSpeaking, makeListener, sttEngine, toast, go, rerender: route, rehearse };
 }
 
 function route() {
@@ -112,14 +117,21 @@ function route() {
   talkCleanup = null;
   stopSpeaking();
   window.scrollTo(0, 0);
-  nav.hidden = view === 'session' || (view === 'talk' && !!arg);
+  const immersive = view === 'session' || (view === 'talk' && !!arg) || (view === 'games' && !!arg && (arg !== 'numbers' || !!arg2));
+  nav.hidden = immersive;
   nav.querySelectorAll('a').forEach((a) => a.classList.toggle('active', a.getAttribute('href') === `#/${view || 'home'}`));
+  const d = talkDeps();
   switch (view) {
     case 'session': return session ? renderSession() : go('home', true);
     case 'talk':
-      if (!arg) return renderTalkList(app, talkDeps());
-      talkCleanup = renderTalk(app, arg, arg2 || 'script', talkDeps());
+      if (!arg) return renderTalkList(app, d);
+      talkCleanup = renderTalk(app, arg, arg2 || 'script', d);
       return;
+    case 'reveal': return renderReveal(app, d);
+    case 'capture': return renderCapture(app, d);
+    case 'novela': talkCleanup = renderNovela(app, arg, d); return;
+    case 'walk': talkCleanup = renderWalk(app, d); return;
+    case 'games': talkCleanup = arg ? renderGame(app, arg, arg2, d) : renderGames(app, d); return;
     case 'stats': return renderStats(app, { state, store, say, ICON });
     case 'units': return renderUnits();
     case 'unit': return renderUnit(arg);
@@ -176,9 +188,10 @@ function renderHome() {
              ? ` · ${heldBack} review${heldBack === 1 ? '' : 's'} saved for a second round (session length is set to ${state.settings.sessionMinutes} min)`
              : planNew < c.newToday && state.settings.sessionMinutes ? ' · fewer new words today so reviews fit your session length' : ''}</p>`}
     </section>
+    ${tilesHtml()}
     <section class="card">
       <h2>Progress</h2>
-      <p>${c.learned} of ${UNITS.reduce((n, u) => n + u.items.length, 0)} words and phrases started.</p>
+      <p>${c.learned} of ${UNITS.reduce((n, u) => n + u.items.length, 0) + (state.settings.herPack ? HER.items.length : 0) + MINE.length} words and phrases started.</p>
       <p class="muted small">Your reviews are scheduled to keep each item at about ${Math.round(state.settings.retention * 100)}% recall. <a href="#/stats">See your stats ›</a></p>
       <p class="muted small">🎤 Speaking: ${speakingEnabled()
         ? `on (${sttEngine() === 'openrouter' ? 'OpenRouter Whisper' : 'phone recogniser'})`
@@ -188,6 +201,33 @@ function renderHome() {
   app.querySelector('[data-act="start"]')?.addEventListener('click', () => startSession());
   app.querySelector('[data-act="practice"]')?.addEventListener('click', () => startSession({ practice: true }));
   app.querySelector('[data-act="more"]')?.addEventListener('click', () => startSession({ extraNew: 5 }));
+}
+
+function tilesHtml() {
+  const days = daysUntil(state.settings.revealDate);
+  const reveal = days == null || days < 0 ? 'Reveal Day' : days === 0 ? 'Today! 💍' : `${days} day${days === 1 ? '' : 's'}`;
+  return `<nav class="tiles" aria-label="More ways to practise">
+    <a href="#/capture"><span>✍️</span>Add a word</a>
+    <a href="#/novela"><span>📖</span>Novela</a>
+    <a href="#/walk"><span>🎧</span>Walk</a>
+    <a href="#/games"><span>🎮</span>Games</a>
+    <a href="#/reveal"><span>💍</span>${reveal}</a>
+  </nav>`;
+}
+
+/** Reveal Day: practise saying your message, line by line (speaking if possible, tiles if not). */
+function rehearse(lines) {
+  if (!lines?.length) return;
+  const queue = [];
+  lines.forEach((l, i) => {
+    const id = `tmp-reveal-${i}`;
+    ITEM_BY_ID.set(id, { id, kind: 'vocab', unit: 'mine', pt: l.pt, en: l.en, accept: [] });
+    queue.push({ id, mode: 'intro' }, { id, mode: 'reask', force: 'speak-read' });
+  });
+  lines.forEach((_, i) => queue.push({ id: `tmp-reveal-${i}`, mode: 'reask', force: 'speak-translate' }));
+  session = new Session(store, queue, { maxRung: speakingEnabled() ? MAX_RUNG : MAX_RUNG_SILENT });
+  session.rehearsal = true;
+  go('session');
 }
 
 function soundsCard() {
@@ -234,6 +274,10 @@ function renderSession() {
   const root = app.querySelector('.exercise');
   const canSpeak = speakingEnabled() && !session.noSpeak;
   let type = chooseExercise(item, card, entry.mode, state, { canListen: speechAvailable(), canSpeak });
+  if (entry.force) {
+    // Rehearsal: speaking if possible, otherwise building the sentence from tiles
+    type = canSpeak ? entry.force : state.settings.noTyping || entry.force === 'speak-read' ? 'tiles' : 'type';
+  }
 
   const ctx = {
     settings: state.settings,
@@ -406,9 +450,12 @@ function examplesHtml(list) {
 }
 
 function finishSession() {
+  const wasRehearsal = session?.rehearsal;
   lastSummary = session ? session.summary : null;
   session = null;
   stopSpeaking();
+  syncPocket(state).catch(() => {});
+  if (wasRehearsal) { toast('Nice rehearsal! 💍'); go('reveal', true); return; }
   go('done', true);
 }
 
@@ -466,15 +513,22 @@ function renderUnits() {
       <div class="progress thin"><div style="width:${(started / u.items.length) * 100}%"></div></div></div></a>`;
   }).join('');
   const earStarted = EAR.filter((e) => state.cards.has(e.id)).length;
+  const herStarted = HER.items.filter((e) => state.cards.has(e.id)).length;
   app.innerHTML = `<h1>Units</h1>${unitCards}
+    <h2 class="level-head">Extras</h2>
     <a class="card unit-card" href="#/unit/ear"><div class="unit-n">👂</div>
       <div class="unit-info"><h3>Ear training</h3><p class="muted small">Sound pairs and word stress · ${earStarted}/${EAR.length} started</p></div></a>
+    <a class="card unit-card" href="#/unit/her"><div class="unit-n">💍</div>
+      <div class="unit-info"><h3>${esc(HER.title)}</h3><p class="muted small">${esc(HER.subtitle)} · ${herStarted}/${HER.items.length} started${state.settings.herPack ? '' : ' · off (turn on in Reveal Day)'}</p></div></a>
+    <a class="card unit-card" href="#/capture"><div class="unit-n">✍️</div>
+      <div class="unit-info"><h3>Your words</h3><p class="muted small">Words you added yourself · ${MINE.length}</p></div></a>
     <p class="muted small">New items are introduced in order. Your daily session picks them up automatically.</p>`;
 }
 
 function renderUnit(n) {
   const isEar = n === 'ear';
-  const u = isEar ? { title: 'Ear training', subtitle: 'Sound pairs and word stress', items: EAR, lessons: [] } : UNITS.find((x) => String(x.n) === n);
+  const u = isEar ? { title: 'Ear training', subtitle: 'Sound pairs and word stress', items: EAR, lessons: [] }
+    : n === 'her' ? HER : UNITS.find((x) => String(x.n) === n);
   if (!u) return go('units', true);
   app.innerHTML = `<a class="back" href="#/units">‹ Units</a><h1>${esc(u.title)}</h1><p class="muted">${esc(u.subtitle)}</p>
     ${u.lessons.length ? `<details class="card"><summary>Grammar notes (${u.lessons.length})</summary>${u.lessons.map((l) => `<h3>${esc(l.title)}</h3><div class="lesson-body">${l.body}</div>`).join('')}</details>` : ''}
@@ -556,6 +610,17 @@ function renderSettings() {
       <p class="muted small">Speak slowly or need thinking time? Make the pause longer.</p>
       <p class="muted small">Your key is stored only on this phone and is never included in backups. Recordings go to OpenRouter only when it is the speech engine or when you ask for pronunciation tips. Tip: set a credit limit on the key at openrouter.ai → Settings → Keys.</p>
     </section>
+    <section class="card form" id="pocket">
+      <h2>Pocket quizzes</h2>
+      <p class="muted small">3 tiny quizzes a day in your notifications, at random times. You see the word, tap <b>Show answer</b>, then <b>✓</b> or <b>✗</b>. It counts as a review without opening the app.</p>
+      <div data-out="pocket"><p class="muted small">Checking…</p></div>
+      <label class="switch"><input type="checkbox" name="pocketHide" ${s.pocketHide ? 'checked' : ''}> Hide the word until I tap (shows "Tap to see today's card")</label>
+      <p class="muted small">To keep them off the lock screen: phone Settings → Notifications → Lock screen notifications → <b>Hide content</b>, or turn lock-screen notifications off for <b>Daily</b> only.</p>
+    </section>
+    <section class="card form">
+      <h2>Reveal Day</h2>
+      <p class="muted small">Her name, the date, the Para ela pack and your message. <a href="#/reveal">Open Reveal Day ›</a></p>
+    </section>
     <section class="card form">
       <h2>Backup</h2>
       <p class="muted small">Your progress is stored only on this phone. Export a backup now and then.</p>
@@ -563,7 +628,10 @@ function renderSettings() {
       <label class="btn">Import backup<input type="file" accept="application/json,.json" hidden name="import"></label></div>
       <button class="btn danger" data-act="reset">Reset all progress</button>
     </section>
-    <p class="muted small center">Português · v${window.APP_VERSION || ''}</p>`;
+    <p class="muted small center">Daily · v${window.APP_VERSION || ''}</p>`;
+
+  renderPocketSettings();
+  app.querySelector('[name="pocketHide"]').addEventListener('change', (e) => { s.pocketHide = e.target.checked; store.saveSettings(); syncPocket(state).catch(() => {}); });
 
   const retOut = app.querySelector('[data-out="retention"]');
   const showRetention = () => {
@@ -632,7 +700,7 @@ function renderSettings() {
     const blob = new Blob([store.exportData()], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `portugues-backup-${store.todayKey()}.json`;
+    a.download = `daily-backup-${store.todayKey()}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   });
@@ -641,6 +709,7 @@ function renderSettings() {
     if (!f) return;
     try {
       await store.importData(await f.text());
+      registerCustom(state.custom);
       toast('Backup restored');
       renderSettings();
     } catch (err) { toast(`Import failed: ${err.message}`); }
@@ -652,6 +721,78 @@ function renderSettings() {
       go('home');
     }
   });
+}
+
+// ---------------- pocket quizzes ----------------
+
+async function renderPocketSettings() {
+  const box = app.querySelector('[data-out="pocket"]');
+  if (!box) return;
+  if (!pushSupported() || location.protocol === 'file:') {
+    box.innerHTML = '<p class="warn small">Notifications aren\'t available here. Open the installed app in Chrome on Android.</p>';
+    return;
+  }
+  let sub = null;
+  try { sub = await currentSubscription(); } catch { /* service worker not ready */ }
+  if (!sub) {
+    box.innerHTML = '<button class="btn primary" data-act="pq-on">Turn on for this device</button><p class="small" data-out="pq-err"></p>';
+    box.querySelector('[data-act="pq-on"]').addEventListener('click', async () => {
+      try { await subscribe(); await syncPocket(state); renderPocketSettings(); }
+      catch (err) { box.querySelector('[data-out="pq-err"]').textContent = err.message; }
+    });
+    return;
+  }
+  const code = JSON.stringify(sub);
+  box.innerHTML = `<p>✅ On for this device.</p>
+    <div class="row"><button class="btn small" data-act="pq-test">Send a test quiz now</button>
+      <button class="btn ghost small" data-act="pq-off">Turn off</button></div>
+    <details ${state.settings.pocketSetupDone ? '' : 'open'}>
+      <summary>One-time setup on GitHub</summary>
+      <ol class="small">
+        <li>Copy this device's setup code.</li>
+        <li>On GitHub, open your app's repository → <b>Settings</b> → <b>Secrets and variables</b> → <b>Actions</b>.</li>
+        <li><b>New repository secret</b>. Name: <code>PUSH_SUBSCRIPTIONS</code>. Value: the code. (Phone and tablet? Put both codes in, one per line.)</li>
+        <li>Also add the <code>VAPID_PRIVATE_KEY</code> secret, if it isn't there yet.</li>
+      </ol>
+      <textarea readonly rows="3" class="code">${esc(code)}</textarea>
+      <div class="row"><button class="btn small" data-act="pq-copy">Copy code</button>
+        ${navigator.share ? '<button class="btn small" data-act="pq-share">Share code</button>' : ''}
+        <button class="btn ghost small" data-act="pq-done">Done</button></div>
+    </details>`;
+  box.querySelector('[data-act="pq-test"]').addEventListener('click', async () => {
+    await syncPocket(state);
+    await testPocket();
+    toast('Sent. Check your notifications.');
+  });
+  box.querySelector('[data-act="pq-off"]').addEventListener('click', async () => { await unsubscribe(); renderPocketSettings(); });
+  box.querySelector('[data-act="pq-copy"]').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(code); toast('Copied'); }
+    catch { box.querySelector('textarea').select(); toast('Select the code and copy it'); }
+  });
+  box.querySelector('[data-act="pq-share"]')?.addEventListener('click', () => navigator.share({ text: code }).catch(() => {}));
+  box.querySelector('[data-act="pq-done"]').addEventListener('click', async () => {
+    state.settings.pocketSetupDone = true;
+    await store.saveSettings();
+    box.querySelector('details').open = false;
+  });
+}
+
+/** Apply ✓/✗ taps from notifications as reviews, on the day they happened. */
+async function applyPocketAnswers() {
+  let answers = [];
+  try { answers = await takeAnswers(); } catch { return; }
+  if (!answers.length) return;
+  const ups = pocketUpdates(state, answers);
+  for (const u of ups) {
+    await store.saveCard(u.card);
+    const day = (state.stats.days[store.todayKey(new Date(u.at))] ||= { reviews: 0, correct: 0, newItems: 0 });
+    day.reviews++;
+    day.recallN = (day.recallN || 0) + 1;
+    if (u.ok) { day.correct++; day.recallOk = (day.recallOk || 0) + 1; }
+    day.pocket = (day.pocket || 0) + 1;
+  }
+  await store.saveStats();
+  if (ups.length) toast(`${ups.length} pocket quiz answer${ups.length === 1 ? '' : 's'} saved ✓`);
 }
 
 // ---------------- misc ----------------
@@ -666,12 +807,26 @@ function toast(msg) {
 
 async function boot() {
   await store.load();
+  registerCustom(state.custom);
+  await applyPocketAnswers();
   await initSpeech();
+  // Text shared to the app from another app (Android share sheet) → quick capture
+  const params = new URLSearchParams(location.search);
+  const shared = [params.get('share_title'), params.get('share_text'), params.get('share_url')].filter(Boolean).join(' ').trim();
+  if (shared) {
+    setShared(shared.slice(0, 300));
+    history.replaceState(null, '', `${location.pathname}#/capture`);
+  }
   window.addEventListener('hashchange', route);
   route();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
+  syncPocket(state).catch(() => {});
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') syncPocket(state).catch(() => {});
+    else applyPocketAnswers().then(() => { if (location.hash.match(/^#\/?(home)?$/)) route(); }).catch(() => {});
+  });
 }
 
 boot().catch((err) => {

@@ -75,6 +75,25 @@ export function speak(text, settings, { rate, vary = false } = {}) {
   });
 }
 
+/** Speak English (walk mode prompts). British voice if there is one. */
+export function speakEnglish(text, { rate = 1 } = {}) {
+  if (!synth) return Promise.resolve();
+  synth.cancel();
+  const en = voices.filter((v) => norm(v.lang).startsWith('en'));
+  const v = en.find((x) => norm(x.lang) === 'en-gb') || en[0];
+  const u = new SpeechSynthesisUtterance(text);
+  if (v) u.voice = v;
+  u.lang = v ? v.lang : 'en-GB';
+  u.rate = rate;
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, 4500 + text.length * 100);
+    const done = () => { clearTimeout(timer); resolve(); };
+    u.onend = done;
+    u.onerror = done;
+    synth.speak(u);
+  });
+}
+
 export function stopSpeaking() {
   synth?.cancel();
 }

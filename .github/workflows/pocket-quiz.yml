@@ -1,0 +1,51 @@
+# Pocket quizzes: pings your phone 3 times a day at slightly random times.
+# The ping is empty; the phone picks the word itself (see js/pocket.js and sw.js).
+#
+# Needs two repository secrets (Settings → Secrets and variables → Actions):
+#   VAPID_PRIVATE_KEY   the private push key
+#   PUSH_SUBSCRIPTIONS  the setup code(s) copied from the app (Settings → Pocket quizzes)
+
+name: Pocket quiz
+
+on:
+  schedule:
+    # Times are UTC (UK time in winter, an hour earlier than UK time in summer).
+    # Each run then waits a random 0–90 minutes, so quizzes don't arrive like clockwork.
+    - cron: '17 8 * * *'
+    - cron: '17 12 * * *'
+    - cron: '47 17 * * *'
+  workflow_dispatch: # "Run workflow" button for a test
+
+permissions:
+  contents: write # only for the keep-alive commit below
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Random delay
+        if: github.event_name == 'schedule'
+        run: sleep $(( RANDOM % 5400 ))
+
+      - name: Send the push
+        run: node scripts/push.mjs
+        env:
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          PUSH_SUBSCRIPTIONS: ${{ secrets.PUSH_SUBSCRIPTIONS }}
+
+      # GitHub pauses scheduled workflows in repos with no activity for 60 days.
+      # An empty commit every ~45 quiet days keeps the quizzes coming.
+      - name: Keep alive
+        if: github.event_name == 'schedule'
+        run: |
+          last=$(git log -1 --format=%ct)
+          days=$(( ( $(date +%s) - last ) / 86400 ))
+          if [ "$days" -ge 45 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "Keep scheduled quizzes active"
+            git push
+          fi

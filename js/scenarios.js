@@ -343,4 +343,53 @@ export const SCENARIOS = [
   },
 ];
 
-export const SCENARIO_BY_ID = new Map(SCENARIOS.map((s) => [s.id, s]));
+// Reveal Day role-plays ("Para ela" pack). {her} and {family} are filled in from Settings → Reveal Day.
+export const PACK_SCENARIOS = [
+  {
+    id: 'almoco', unit: 'her', level: 'A1', emoji: '🍲', title: 'Sunday lunch with her family',
+    setting: "Sunday lunch at her parents' home in Portugal. The learner is meeting them for the first time. {family}",
+    role: "Her mum: warm, curious, a little talkative and very proud of her cooking. Speak to the learner politely (o senhor / você) until they ask for tu. Ask simple questions: where they're from, what they do, if they like the food. Keep offering more food.",
+    goals: ['Say lovely to meet you', 'Thank her for inviting you', 'Compliment the food', 'Answer a question about yourself', "Politely say you're full"],
+    opening: { pt: 'Olá! Entre, entre! Muito prazer!', en: 'Hello! Come in, come in! Lovely to meet you!' },
+    script: [
+      { tutor: { pt: 'Olá! Entre, entre! Muito prazer!', en: 'Hello! Come in, come in! Lovely to meet you!' }, task: 'Say lovely to meet you (polite, to her).',
+        expect: ['muito prazer em conhecê-la.', 'muito prazer!'], keywords: ['prazer'] },
+      { tutor: { pt: 'Sente-se, sente-se. O almoço está pronto!', en: 'Sit down, sit down. Lunch is ready!' }, task: 'Thank her for inviting you.',
+        expect: ['obrigado pelo convite.', 'obrigada pelo convite.'], keywords: ['obrigad', 'convite'] },
+      { tutor: { pt: 'Então, gosta do bacalhau?', en: 'So, do you like the bacalhau?' }, task: 'Say everything is delicious.',
+        expect: ['está tudo delicioso!', 'gosto muito, está delicioso.'], keywords: ['delicios', 'gosto', 'bom'] },
+      { tutor: { pt: 'Que bom! E de onde é?', en: 'Great! And where are you from?' }, task: 'Say where you are from.',
+        expect: ['sou de Inglaterra.', 'sou de Londres.'], keywords: ['sou de', 'sou ingl'] },
+      { tutor: { pt: 'Mais um bocadinho?', en: 'A little more?' }, task: "Politely say you're full, thank you.",
+        expect: ['já estou satisfeito, obrigado.', 'já estou satisfeita, obrigada.'], keywords: ['satisfeit', 'cheio', 'cheia', 'obrigad'] },
+    ],
+    closing: { pt: 'Ai, que simpático! Volte sempre!', en: 'Oh, how lovely! Come back any time!' },
+  },
+  {
+    id: 'revelacao', unit: 'her', level: 'A1', emoji: '💍', title: 'Tell her',
+    setting: 'A quiet evening at home. The learner surprises their girlfriend by speaking Portuguese to her for the first time.',
+    role: "{her}, the learner's Portuguese girlfriend. She is completely surprised and delighted: react naturally (Não acredito! A sério?!), ask how and when they learned, and how they kept it secret. Speak to them with tu. Keep it simple and warm.",
+    goals: ['Tell her you have a surprise', "Say you've been learning Portuguese in secret", 'Say you did it for her', 'Tell her how you feel'],
+    opening: { pt: 'Olá, amor! Então, como foi o teu dia?', en: 'Hi, love! So, how was your day?' },
+    script: [
+      { tutor: { pt: 'Olá, amor! Então, como foi o teu dia?', en: 'Hi, love! So, how was your day?' }, task: 'Say you have a surprise for her.',
+        expect: ['tenho uma surpresa para ti.', 'foi bom! tenho uma surpresa para ti.'], keywords: ['surpresa'] },
+      { tutor: { pt: 'O quê?! Estás a falar português?!', en: "What?! You're speaking Portuguese?!" }, task: "Say you've been learning Portuguese in secret.",
+        expect: ['ando a aprender português às escondidas.', 'sim! ando a aprender português às escondidas.'], keywords: ['aprender', 'escondidas', 'segredo'] },
+      { tutor: { pt: 'Não acredito! Mas porquê?', en: "I can't believe it! But why?" }, task: 'Say you did it for her.',
+        expect: ['fiz isto por ti.', 'por ti, meu amor.'], keywords: ['por ti', 'para ti'] },
+      { tutor: { pt: 'Ai, que querido… Estou sem palavras!', en: "Aww, how sweet… I'm speechless!" }, task: 'Tell her you love her.',
+        expect: ['amo-te.', 'amo-te, meu amor.'], keywords: ['amo-te', 'amo te', 'gosto muito de ti'] },
+    ],
+    closing: { pt: 'Também te amo! Agora só falamos português, está bem?', en: "I love you too! Now we only speak Portuguese, OK?" },
+  },
+];
+
+/** Fill in her name and family details for the Reveal Day role-plays. */
+export function personalize(scenario, settings) {
+  if (scenario.unit !== 'her') return scenario;
+  const fill = (t) => t.replace('{her}', settings.herName ? `${settings.herName}` : 'She').replace('{family}', settings.herFamily ? `About her family: ${settings.herFamily}` : '');
+  return { ...scenario, setting: fill(scenario.setting), role: fill(scenario.role) };
+}
+
+export const SCENARIO_BY_ID = new Map([...SCENARIOS, ...PACK_SCENARIOS].map((s) => [s.id, s]));

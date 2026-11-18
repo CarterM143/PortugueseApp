@@ -1,6 +1,6 @@
 // Conversation screens: scenario list and the chat-style role-play.
 
-import { SCENARIOS, SCENARIO_BY_ID } from './scenarios.js';
+import { SCENARIOS, SCENARIO_BY_ID, PACK_SCENARIOS, personalize } from './scenarios.js';
 import { AiConversation, ScriptedConversation, DEFAULT_TUTOR_MODEL } from './tutor.js';
 import { UNITS, levelOf } from './content.js';
 import { esc, ICON } from './exercises.js';
@@ -31,23 +31,29 @@ export function renderTalkList(app, d) {
     <p class="muted">Short role-plays using the words you're learning. ${hasKey
       ? 'With the AI tutor you can say anything. It nudges you to fix mistakes yourself.'
       : 'Add an OpenRouter key in Settings for the free-form AI tutor. Guided practice scripts work offline.'}</p>
-    ${[rec, ...SCENARIOS.filter((s) => s !== rec)].map((s, i) => `
-      ${i === 1 ? '<h2 class="level-head">All role-plays</h2>' : ''}
+    ${scenarioCard(rec, rec, hasKey)}
+    ${d.state.settings.herPack ? `<h2 class="level-head">Reveal Day 💍</h2>${PACK_SCENARIOS.map((s) => scenarioCard(s, rec, hasKey)).join('')}` : ''}
+    <h2 class="level-head">All role-plays</h2>
+    ${SCENARIOS.filter((s) => s !== rec).map((s) => scenarioCard(s, rec, hasKey)).join('')}`;
+}
+
+function scenarioCard(s, rec, hasKey) {
+  return `
       <section class="card scenario ${s.id === rec.id ? 'rec' : ''}">
         <div class="scen-head"><span class="scen-emoji">${s.emoji}</span>
-          <div><h3>${esc(s.title)}</h3><p class="muted small">Unit ${s.unit} · ${levelOf(s.unit)} · ${esc(s.goals.join(' · '))}</p></div></div>
+          <div><h3>${esc(s.title)}</h3><p class="muted small">${s.unit === 'her' ? 'Para ela' : `Unit ${s.unit} · ${levelOf(s.unit)}`} · ${esc(s.goals.join(' · '))}</p></div></div>
         ${s.id === rec.id ? '<p class="tag">Recommended</p>' : ''}
         <div class="row">
           ${hasKey ? `<a class="btn primary small" href="#/talk/${s.id}/ai">Talk with the AI tutor</a>` : ''}
           <a class="btn small" href="#/talk/${s.id}/script">Guided practice</a>
         </div>
-      </section>`).join('')}`;
+      </section>`;
 }
 
 export function renderTalk(app, id, mode, d) {
-  const scenario = SCENARIO_BY_ID.get(id);
-  if (!scenario) return d.go('talk', true);
   const s = d.state.settings;
+  const scenario = SCENARIO_BY_ID.has(id) ? personalize(SCENARIO_BY_ID.get(id), s) : null;
+  if (!scenario) return d.go('talk', true);
   const ai = mode === 'ai' && !!s.apiKey;
   // In course order, so the prompt's "most recent 200" are the newest units
   const known = UNITS.flatMap((u) => u.items).filter((i) => d.state.cards.get(i.id)?.s).map((i) => i.pt);

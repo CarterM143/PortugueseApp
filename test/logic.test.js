@@ -369,12 +369,13 @@ test('parseJsonReply tolerates chatter around JSON', () => {
 // ---------- tutor ----------
 
 test('scenarios: every scripted model answer passes its own check', async () => {
-  const { SCENARIOS } = await import('../js/scenarios.js');
+  const { SCENARIOS, PACK_SCENARIOS } = await import('../js/scenarios.js');
   const { checkScripted } = await import('../js/tutor.js');
   assert.equal(SCENARIOS.length, 20);
   for (const u of UNITS) assert.ok(SCENARIOS.some((s) => s.unit === u.n), `no scenario for unit ${u.n}`);
-  assert.equal(new Set(SCENARIOS.map((s) => s.id)).size, SCENARIOS.length);
-  for (const s of SCENARIOS) {
+  const all = [...SCENARIOS, ...PACK_SCENARIOS];
+  assert.equal(new Set(all.map((s) => s.id)).size, all.length);
+  for (const s of all) {
     assert.ok(s.goals.length && s.script.length && s.opening.pt && s.closing.pt, s.id);
     for (const t of s.script) {
       for (const e of t.expect) {

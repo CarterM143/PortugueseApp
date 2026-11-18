@@ -24,6 +24,15 @@ export const DEFAULT_SETTINGS = {
   tutorModel: 'mistralai/voxtral-small-24b-2507',
   tutorShowEn: false,  // show English under tutor lines automatically
   handsFreePause: 2.5, // seconds of silence before hands-free stops listening
+  // Reveal Day (Phase 5)
+  herPack: false,      // mix the "Para ela" pack into new words
+  herName: '',         // used in the Reveal Day role-plays
+  herFamily: '',       // free text about her family, for the family-lunch role-play
+  revealDate: '',      // YYYY-MM-DD
+  // Pocket quizzes (Phase 5)
+  pocketHide: false,   // first notification says nothing until tapped
+  // Walk mode
+  walkPause: 4,        // seconds to answer before the Portuguese is played
 };
 
 let dbPromise;
@@ -60,21 +69,41 @@ export const state = {
   cards: new Map(),            // id -> {id, s, d, due, last, reps, lapses, rung, hook}
   settings: { ...DEFAULT_SETTINGS },
   // days: {'YYYY-MM-DD': {reviews, correct, newItems, newEar, recallN, recallOk, seconds, talks, talkMinutes}}
-  stats: { days: {}, recent: [] },
+  stats: { days: {}, recent: [] },  // also: sounds, games {blitz, ear, numbers: best scores}
   seenLessons: new Set(),
+  custom: [],                  // your own words: [{id, pt, en, note, source, at}]
+  novela: [],                  // story episodes, newest last
 };
 
 export async function load() {
-  const [cards, settings, stats, seen] = await Promise.all([
+  const [cards, settings, stats, seen, custom, novela] = await Promise.all([
     run('cards', 'readonly', (s) => s.getAll()),
     run('meta', 'readonly', (s) => s.get('settings')),
     run('meta', 'readonly', (s) => s.get('stats')),
     run('meta', 'readonly', (s) => s.get('seenLessons')),
+    run('meta', 'readonly', (s) => s.get('custom')),
+    run('meta', 'readonly', (s) => s.get('novela')),
   ]);
   state.cards = new Map((cards || []).map((c) => [c.id, c]));
   state.settings = { ...DEFAULT_SETTINGS, ...(settings || {}) };
   state.stats = { days: {}, recent: [], ...(stats || {}) };
   state.seenLessons = new Set(seen || []);
+  state.custom = custom || [];
+  state.novela = novela || [];
+}
+
+export function saveCustom() {
+  return run('meta', 'readwrite', (s) => s.put(state.custom, 'custom'));
+}
+
+export function saveNovela() {
+  state.novela = state.novela.slice(-60);
+  return run('meta', 'readwrite', (s) => s.put(state.novela, 'novela'));
+}
+
+export function deleteCard(id) {
+  state.cards.delete(id);
+  return run('cards', 'readwrite', (s) => s.delete(id));
 }
 
 export function saveCard(card) {
@@ -126,6 +155,7 @@ export function exportData() {
     cards: [...state.cards.values()],
     settings: { ...state.settings, apiKey: '' }, // never put the API key in a backup file
     stats: state.stats, seenLessons: [...state.seenLessons],
+    custom: state.custom, novela: state.novela,
   });
 }
 
@@ -136,7 +166,9 @@ export async function importData(json) {
   state.settings = { ...DEFAULT_SETTINGS, ...data.settings, apiKey: state.settings.apiKey };
   state.stats = { days: {}, recent: [], ...data.stats };
   state.seenLessons = new Set(data.seenLessons || []);
-  await Promise.all([saveSettings(), saveStats(),
+  state.custom = data.custom || [];
+  state.novela = data.novela || [];
+  await Promise.all([saveSettings(), saveStats(), saveCustom(), saveNovela(),
     run('meta', 'readwrite', (s) => s.put([...state.seenLessons], 'seenLessons'))]);
   await load();
 }

@@ -12,6 +12,7 @@
 
 import { UNITS_6_10 } from './content-a1.js';
 import { UNITS_11_20 } from './content-a2.js';
+import { HER_PACK } from './content-her.js';
 
 function slug(s) {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
@@ -332,6 +333,37 @@ export const EAR = [
   stress(['Lis', 'bo', 'a'], 1, 'Lisbon'),
 ];
 
-export const ALL_ITEMS = [...UNITS.flatMap((u) => u.items), ...EAR];
+// ---- Reveal Day pack ("Para ela") ----
+export const HER = {
+  ...HER_PACK,
+  items: HER_PACK.items.map(([pt, en, opts = {}]) => ({ id: `her-${slug(pt)}`, kind: 'vocab', unit: 'her', pt, en, accept: [], ...opts })),
+};
+
+export const ALL_ITEMS = [...UNITS.flatMap((u) => u.items), ...HER.items, ...EAR];
 export const ITEM_BY_ID = new Map(ALL_ITEMS.map((i) => [i.id, i]));
-export const LESSON_BY_ID = new Map(UNITS.flatMap((u) => u.lessons).map((l) => [l.id, l]));
+export const LESSON_BY_ID = new Map([...UNITS.flatMap((u) => u.lessons), ...HER.lessons].map((l) => [l.id, l]));
+
+// ---- Your own words (quick capture, Novela, Reveal message) ----
+// Stored on the device; registered here at start-up so sessions can look them up like any item.
+export const MINE = [];
+
+export function customItem({ pt, en, note = '', source = 'capture', at = Date.now() }) {
+  return { id: `c-${at.toString(36)}-${slug(pt).slice(0, 24)}`, kind: 'vocab', unit: 'mine', pt: pt.trim(), en: en.trim(), accept: [], note, source, at };
+}
+
+export function registerCustom(list) {
+  for (const it of list) {
+    if (ITEM_BY_ID.has(it.id)) continue;
+    const item = { kind: 'vocab', unit: 'mine', accept: [], ...it };
+    MINE.push(item);
+    ITEM_BY_ID.set(item.id, item);
+  }
+}
+
+export function unregisterCustom(id) {
+  const i = MINE.findIndex((x) => x.id === id);
+  if (i >= 0) MINE.splice(i, 1);
+  ITEM_BY_ID.delete(id);
+}
+
+export { slug };

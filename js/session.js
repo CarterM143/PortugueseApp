@@ -3,7 +3,7 @@
 
 import { schedule, dayNumber, retrievability } from './fsrs.js';
 import { ratingFor } from './grade.js';
-import { UNITS, EAR, ITEM_BY_ID } from './content.js';
+import { UNITS, EAR, ITEM_BY_ID, HER, MINE } from './content.js';
 
 export const MAX_RUNG = 7;        // with speaking
 export const MAX_RUNG_SILENT = 5; // without speaking
@@ -56,6 +56,29 @@ export function estimateMinutes(queue) {
   return Math.max(1, Math.round(s / 60));
 }
 
+// ---------- new-item order ----------
+
+/**
+ * Items not started yet, in the order they'll be introduced:
+ * your own captured words first, then the course. With the Reveal Day pack on,
+ * every third new word comes from the pack until it's done.
+ */
+export function newPool(st) {
+  const unseen = (i) => !st.cards.has(i.id);
+  const mine = MINE.filter(unseen);
+  const course = UNITS.flatMap((u) => u.items).filter(unseen);
+  if (!st.settings.herPack) return [...mine, ...course];
+  const her = HER.items.filter(unseen);
+  const out = [];
+  let c = 0, h = 0;
+  while (c < course.length || h < her.length) {
+    const herTurn = out.length % 3 === 2;
+    if (h < her.length && (herTurn || c >= course.length)) out.push(her[h++]);
+    else out.push(course[c++]);
+  }
+  return [...mine, ...out];
+}
+
 // ---------- counts for the home screen ----------
 
 export function counts(st, today, now = Date.now()) {
@@ -68,7 +91,7 @@ export function counts(st, today, now = Date.now()) {
     if (c.due <= day) item.kind === 'vocab' ? dueVocab++ : dueEar++;
   }
   const newLeft = Math.max(0, st.settings.newPerDay - (today.newItems || 0));
-  const unseen = UNITS.flatMap((u) => u.items).filter((i) => !st.cards.has(i.id)).length;
+  const unseen = newPool(st).length;
   return { dueVocab, dueEar, due: dueVocab + dueEar, newToday: Math.min(newLeft, unseen), unseen, learned };
 }
 
@@ -119,7 +142,7 @@ export function buildQueue(st, today, { extraNew = 0, practice = false, now = Da
   // 3) new vocabulary, introduced in a themed block (not interleaved: better for first learning)
   let newCount = practice ? extraNew : Math.max(0, st.settings.newPerDay - (today.newItems || 0)) + extraNew;
   newCount = Math.min(newCount, Math.floor(budget / COST.newItem));
-  const fresh = UNITS.flatMap((u) => u.items).filter((i) => !st.cards.has(i.id)).slice(0, newCount);
+  const fresh = newPool(st).slice(0, newCount);
   const lessonsQueued = new Set();
   fresh.forEach((item, i) => {
     if (item.lesson && !st.seenLessons.has(item.lesson) && !lessonsQueued.has(item.lesson)) {
@@ -212,7 +235,7 @@ function overlaps(a, b) {
 
 /** 3 distractors: same unit first, similar length preferred, never ambiguous. */
 export function distractors(item, n = 3, rand = Math.random) {
-  const sameUnit = UNITS.find((u) => u.n === item.unit)?.items || [];
+  const sameUnit = item.unit === 'her' ? HER.items : UNITS.find((u) => u.n === item.unit)?.items || [];
   const others = UNITS.flatMap((u) => u.items);
   const pool = shuffle(sameUnit, rand).concat(shuffle(others, rand));
   const words = wordCount(item.pt);

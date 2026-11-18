@@ -115,6 +115,36 @@ Reply with JSON only: {"hook": "..."}`,
   return parseJsonReply(reply)?.hook || reply.trim().slice(0, 200);
 }
 
+/** Quick capture: English or Portuguese in → a natural European Portuguese card out. */
+export async function cardFromText(key, text, { model }) {
+  const reply = await chat(key, [{
+    role: 'user',
+    content: `A learner of EUROPEAN Portuguese (Portugal, not Brazil) wants to remember this: "${text.slice(0, 300)}"
+If it is English (or another language), give the natural way to say it in Portugal, kept short and simple.
+If it is Portuguese, keep it (fix only obvious typos, and use the Portugal form if it is Brazilian) and give its meaning.
+Reply with JSON only: {"pt": "<European Portuguese>", "en": "<short English meaning>", "note": "<optional one-line tip, e.g. formality or a Brazil/Portugal difference, or empty>"}`,
+  }], { model, temperature: 0.2, max_tokens: 250, json: true });
+  const j = parseJsonReply(reply);
+  if (!j?.pt) throw new Error('Could not get a translation. Try again, or type both sides yourself.');
+  return { pt: String(j.pt).trim(), en: String(j.en || '').trim(), note: String(j.note || '').trim() };
+}
+
+/** Reveal Day: turn what you want to tell her into short, natural European Portuguese lines. */
+export async function revealLines(key, english, { model, level = 'A1', known = [], herName = '' }) {
+  const reply = await chat(key, [{
+    role: 'user',
+    content: `A learner (${level} level) has secretly been learning EUROPEAN Portuguese to surprise their Portuguese girlfriend${herName ? `, ${herName}` : ''}. They want to say this to her:
+"${english.slice(0, 1200)}"
+Write it as she'd find it natural and moving, in European Portuguese as spoken in Portugal (tu with her, pronouns after the verb: amo-te), but simple enough for ${level}: short sentences, common words, and where possible these words they already know: ${known.slice(-150).join('; ')}.
+At most 8 short lines, one sentence each.
+Reply with JSON only: {"lines": [{"pt": "<European Portuguese>", "en": "<literal English>"}], "note": "<one short tip on saying it, or empty>"}`,
+  }], { model, temperature: 0.4, max_tokens: 900, json: true });
+  const j = parseJsonReply(reply);
+  const lines = (j?.lines || []).filter((l) => l?.pt).map((l) => ({ pt: String(l.pt).trim(), en: String(l.en || '').trim() })).slice(0, 8);
+  if (!lines.length) throw new Error('Could not write that. Try again.');
+  return { lines, note: String(j.note || '').trim() };
+}
+
 /** Key status: usage and limit. */
 export async function keyInfo(key) {
   const j = await request(key, '/key', { method: 'GET' });

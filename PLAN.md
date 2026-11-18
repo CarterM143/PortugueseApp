@@ -139,6 +139,17 @@ Content is written for **Portugal**: *tu* for friends and *você* or *o senhor/a
    - Settings for session length (reviews first, new words fill the rest, so a backlog can't snowball), new words and ear items per day, and target recall, with the review cost of that target shown.
 
    Originally planned as: units 6–20, stats such as retention and forecast, and settings for the retention target, daily new-item cap and session length. Units came out at about 30–35 items rather than 40–60, so each one fits in roughly 3–4 days at the default pace.
+5. **Phase 5, extras (status: done, v0.5):**
+   - **Discreet name:** the app is now called "Daily", with a plain tick icon.
+   - **Pocket quizzes:** 3 notifications a day. Each one is a real retrieval attempt: the word, then Show answer, then ✓ or ✗, saved as a review. Sent by a scheduled GitHub Action with an empty Web Push. The phone picks the word (the ones closest to being forgotten), so no word content leaves the device. There's an option to hide the word until tapped.
+   - **Reveal Day:** a countdown and a pace planner (which unit you'll reach, and the words per day needed for a target unit).
+     - The **Para ela** pack: 37 items and 3 grammar notes for her, her family and the reveal. It is mixed into new words, one in three.
+     - Your message turned into simple European Portuguese and rehearsed line by line.
+     - Two personalised role-plays: Sunday lunch with her family, and Tell her.
+   - **Quick capture:** add a word yourself, or share text to the app from Android. With a key, it's translated into European Portuguese. Your own words come first in new words.
+   - **A Novela:** a daily AI episode built from the words you know plus 2–3 upcoming ones, as comprehensible input. Tap any word for its meaning or to add it. There's a comprehension question, and it unlocks at 40 words.
+   - **Walk mode:** an earphone drill. You hear the English, have a pause to say it, then hear the Portuguese twice. Weakest words come first and each one repeats. The screen stays on, dimmed to black.
+   - **Games:** Blitz (match pairs), Ear rush (hear and pick) and Números (numbers, prices and phone numbers by ear). All are 60 seconds with combos and best scores.
 
 ---
 

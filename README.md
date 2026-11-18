@@ -1,6 +1,6 @@
-# Português
+# Daily (Português)
 
-A personal app for practising European Portuguese every day. It's a web app you can install on your phone (a PWA): no app store, no subscription, and it works offline.
+A personal app for practising European Portuguese every day. It's a web app you can install on your phone (a PWA): no app store, no subscription, and it works offline. On the phone it shows up as **Daily**, with a plain tick icon.
 
 The learning method behind it (spaced repetition, retrieval practice, adaptive difficulty and ear training) is explained in [PLAN.md](PLAN.md).
 
@@ -63,6 +63,28 @@ Under **Settings → Learning** you can set:
 - **New words per day** and **new ear-training items per day.**
 - **Target recall:** the app shows what each setting costs in reviews.
 
+## Extras (on the home screen)
+
+- **✍️ Add a word:** type something you wanted to say, or share text to **Daily** from any app. With a key it's translated into European Portuguese. Your own words come first in your next session.
+- **📖 Novela:** a daily soap-opera episode written from words you know plus 2–3 new ones. Tap any word for its meaning. It unlocks at 40 words and needs a key.
+- **🎧 Walk:** a hands-free earphone drill. You hear the English, say it, then hear the Portuguese twice.
+- **🎮 Games:** Blitz, Ear rush and Números (numbers, prices and phone numbers by ear).
+- **💍 Reveal Day:** a countdown and pace planner, the *Para ela* pack, your message in Portuguese with rehearsal, and two personalised role-plays.
+
+## Pocket quizzes (notifications)
+
+Three times a day, a GitHub Action sends an empty push to your phone. The phone then shows a quiz: you see the word, tap **Show answer**, then tap **✓** or **✗**. That counts as a review. The push carries no content, because the phone picks the word itself.
+
+One-time setup:
+
+1. In the app: **Settings → Pocket quizzes → Turn on for this device**, then copy the setup code.
+2. On GitHub: **Settings → Secrets and variables → Actions → New repository secret**:
+   - `PUSH_SUBSCRIPTIONS`: the setup code. For more than one device, put each code on its own line.
+   - `VAPID_PRIVATE_KEY`: the private push key. It was generated locally into `.secrets/`, which git ignores. Never commit it.
+3. Test it under **Actions → Pocket quiz → Run workflow**.
+
+Times are set in `.github/workflows/pocket-quiz.yml`: around 08:00, 12:00 and 17:30 UTC, plus a random delay of up to 90 minutes. If the repo has had no activity for 45 days, the workflow makes an empty commit, because GitHub pauses scheduled workflows after 60 quiet days.
+
 ## Your data
 
 Your progress is stored only on your phone (in IndexedDB). It is never put in this repository. Use **Settings → Export backup** now and then.
@@ -83,5 +105,9 @@ Don't commit API keys to this repository: it's public. The app keeps your OpenRo
 | `js/grade.js` | Forgiving answer marking (accents, typos, articles) |
 | `js/exercises.js` | Exercise screens |
 | `js/content.js`, `js/content-a1.js`, `js/content-a2.js` | Units 1–20 and ear-training items |
+| `js/content-her.js` | The *Para ela* (Reveal Day) pack |
+| `js/extras.js` | Reveal Day and quick capture screens |
+| `js/novela.js`, `js/walk.js`, `js/games.js`, `js/numbers.js` | Novela, Walk mode, games, numbers in words |
+| `js/pocket.js`, `scripts/push.mjs`, `.github/workflows/pocket-quiz.yml` | Pocket quizzes: device side, push sender, schedule |
 | `js/store.js` | IndexedDB storage, backup and restore |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline support and installability |
