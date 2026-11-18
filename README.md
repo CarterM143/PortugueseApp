@@ -1,0 +1,57 @@
+# Português
+
+A personal app for practising European Portuguese every day. It's a web app you can install on your phone (a PWA): no app store, no subscription, and it works offline.
+
+The learning method behind it (spaced repetition, retrieval practice, adaptive difficulty and ear training) is explained in [PLAN.md](PLAN.md).
+
+## Run it locally
+
+```bash
+python -m http.server 8080
+```
+
+Then open http://localhost:8080.
+
+Run the logic tests (scheduler, answer marking, content checks, session flow):
+
+```bash
+npm test
+```
+
+## Put it on your phone (GitHub Pages, free)
+
+1. Create a **public** repository on GitHub, for example `portugues`, and push this folder to it.
+2. On GitHub, open the repository's **Settings → Pages**. Under **Build and deployment**, choose *Deploy from a branch*, select `main` and `/ (root)`, and save.
+3. After a minute or so the site is live at `https://<your-username>.github.io/portugues/`.
+4. On your Android phone, open that address in **Chrome**. Tap **⋮ → Add to Home screen** (or **Install app**).
+
+### European Portuguese voice (Android)
+
+The app uses your phone's own text-to-speech voice. To get the Portugal accent rather than the Brazilian one:
+
+1. Open **Settings**, search for **Text-to-speech**, and go to **Speech Services by Google**.
+2. Open the settings (⚙) and choose **Install voice data**.
+3. Install **Português (Portugal)**.
+
+Then pick that voice in the app's **Settings** screen.
+
+## Your data
+
+Your progress is stored only on your phone (in IndexedDB). It is never put in this repository. Use **Settings → Export backup** now and then.
+
+Don't commit API keys to this repository: it's public. The AI tutor, coming in a later phase, will keep your OpenRouter key on the phone only.
+
+## Structure
+
+| Path | What it is |
+|---|---|
+| `index.html`, `css/style.css` | App shell and styles |
+| `js/app.js` | Screens: home, session, units, settings |
+| `js/session.js` | Daily queue, adaptive difficulty, re-asking missed items |
+| `js/fsrs.js` | FSRS-4.5 spaced-repetition scheduler |
+| `js/grade.js` | Forgiving answer marking (accents, typos, articles) |
+| `js/exercises.js` | Exercise screens |
+| `js/content.js` | Units 1–5 and ear-training items |
+| `js/speech.js` | Text-to-speech (prefers pt-PT voices) |
+| `js/store.js` | IndexedDB storage, backup and restore |
+| `sw.js`, `manifest.webmanifest`, `icons/` | Offline support and installability |

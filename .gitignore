@@ -1,0 +1,8 @@
+node_modules/
+.claude/
+*.log
+.DS_Store
+Thumbs.db
+# never commit backups or keys
+portugues-backup-*.json
+.env

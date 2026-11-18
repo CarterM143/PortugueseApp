@@ -1,0 +1,9 @@
+{
+  "name": "portugues",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/",
+    "serve": "python -m http.server 8080"
+  }
+}
