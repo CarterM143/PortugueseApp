@@ -4,6 +4,7 @@
 import { chat, parseJsonReply } from './openrouter.js';
 import { assessSpeech } from './pronounce.js';
 import { grade, stripAccents } from './grade.js';
+import { levelOf } from './content.js';
 
 export const DEFAULT_TUTOR_MODEL = 'mistralai/voxtral-small-24b-2507';
 export const TUTOR_SUGGESTIONS = [
@@ -21,8 +22,14 @@ export const MAX_LEARNER_TURNS = 24;
 
 // ---------------- prompts ----------------
 
+const LEVEL_GUIDE = {
+  A1: 'The learner is an A1 beginner. Use very short, simple sentences (max ~12 words) and common words, mostly in the present tense. One question at a time.',
+  A2: 'The learner is around A2. Use short, clear sentences (max ~16 words). Present, the past (pretérito perfeito) and "ir + infinitive" are fine. One question at a time.',
+};
+
 export function systemPrompt(scenario, known) {
-  const knownList = known.slice(0, 160).join('; ');
+  const knownList = known.slice(-200).join('; ');
+  const level = levelOf(scenario.unit);
   return `You are a friendly tutor helping a beginner practise EUROPEAN Portuguese (Portugal, NOT Brazil) through a short role-play.
 
 SCENARIO: ${scenario.setting}
@@ -31,7 +38,7 @@ LEARNER'S GOALS (numbered from 0): ${scenario.goals.map((g, i) => `${i}. ${g}`).
 
 LANGUAGE RULES
 - Only European Portuguese as spoken in Portugal: tu / você / o senhor as used in Portugal, "estar a + infinitive" (never the gerund), Portugal vocabulary (pequeno-almoço, autocarro, comboio, casa de banho, sumo, sandes, ementa, telemóvel, fixe, giro), pronouns after the verb in statements (chamo-me, chama-se).
-- The learner is an A1 beginner. Use very short, simple sentences (max ~12 words) and common words. One question at a time.
+- ${LEVEL_GUIDE[level]}
 - Prefer words the learner already knows: ${knownList || '(basic greetings)'}.
 
 UNDERSTANDING THE LEARNER
@@ -39,12 +46,12 @@ UNDERSTANDING THE LEARNER
 - They may be slow or unsure. Be patient and encouraging. If they write in English or ask for help, help briefly in English and give the Portuguese they need.
 
 CORRECTION (prompt first, one thing at a time)
-- Only correct real errors that matter at A1: wrong word, wrong verb form, wrong gender, a Brazilian form, or a meaning that is unclear.
+- Only correct real errors that matter at ${level}: wrong word, wrong verb form, wrong gender, a Brazilian form, or a meaning that is unclear.
 - The message tells you the attempt number for the learner's current line:
   attempt 1 with an error: feedback.type "hint". Give a short English clue so they can fix it themselves, not the answer. retry true. reply = a short encouraging nudge in Portuguese (e.g. "Quase! Tenta outra vez.").
   attempt 2 with an error: feedback.type "explicit". Say exactly what is wrong in English, still without the full answer. retry true.
   attempt 3: feedback.type "correction". Give the corrected sentence in "corrected" with a one-line reason. retry false. Continue the role-play.
-- If the line is fine for A1: feedback.type "none" (or "tip" for ONE optional small improvement). retry false. Continue the role-play naturally.
+- If the line is fine for ${level}: feedback.type "none" (or "tip" for ONE optional small improvement). retry false. Continue the role-play naturally.
 - Never correct more than one thing per turn.
 
 FLOW
@@ -121,7 +128,7 @@ export class AiConversation {
 
   async helpMeSay(english) {
     const raw = await this.chatFn(this.key, [
-      { role: 'system', content: `You help an A1 beginner learning EUROPEAN Portuguese (Portugal). Scenario: ${this.scenario.setting} They are talking to: ${this.scenario.role}` },
+      { role: 'system', content: `You help an ${levelOf(this.scenario.unit)} learner of EUROPEAN Portuguese (Portugal). Scenario: ${this.scenario.setting} They are talking to: ${this.scenario.role}` },
       { role: 'user', content: `How do I say this, as simply as possible, in European Portuguese? "${english}"\nReply with JSON only: {"pt": "<Portuguese>", "en": "<literal English back-translation>", "note": "<optional one-line tip, or empty>"}` },
     ], { model: this.model, temperature: 0.2, max_tokens: 200, json: true });
     const j = parseJsonReply(raw);

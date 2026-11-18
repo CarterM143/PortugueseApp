@@ -4,10 +4,12 @@ import * as store from './store.js';
 import { state } from './store.js';
 import { initSpeech, speak, speechAvailable, hasPtPtVoice, portugueseVoices, chosenVoice, stopSpeaking } from './speech.js';
 import { UNITS, EAR, ITEM_BY_ID } from './content.js';
-import { Session, buildQueue, chooseExercise, easierExercise, counts, MAX_RUNG, MAX_RUNG_SILENT } from './session.js';
+import { Session, buildQueue, chooseExercise, easierExercise, counts, estimateMinutes, MAX_RUNG, MAX_RUNG_SILENT } from './session.js';
+import { renderStats } from './stats.js';
+import { levelOf } from './content.js';
 import { renderExercise, esc, ICON, stressMarkup } from './exercises.js';
 import { diffWords } from './grade.js';
-import { dayNumber } from './fsrs.js';
+import { dayNumber, intervalFor } from './fsrs.js';
 import { AudioCapture, PhoneRecognition, micAvailable, phoneRecognitionAvailable } from './recorder.js';
 import { transcribe, coachPronunciation, keyInfo, COACH_SUGGESTIONS, DEFAULT_MODELS } from './openrouter.js';
 import { assessSpeech, soundFeatures, SOUND_FEATURES } from './pronounce.js';
@@ -118,6 +120,7 @@ function route() {
       if (!arg) return renderTalkList(app, talkDeps());
       talkCleanup = renderTalk(app, arg, arg2 || 'script', talkDeps());
       return;
+    case 'stats': return renderStats(app, { state, store, say, ICON });
     case 'units': return renderUnits();
     case 'unit': return renderUnit(arg);
     case 'settings': return renderSettings();
@@ -144,6 +147,11 @@ function renderHome() {
       ? `<div class="banner warn"><b>Only a Brazilian voice is available.</b> For the European accent, install <b>Português (Portugal)</b> voice data in your phone's text-to-speech settings.</div>`
       : '';
   const nothing = c.due === 0 && c.newToday === 0;
+  // What the next session will actually contain (session length may hold some back)
+  const plan = buildQueue(state, today);
+  const planReviews = plan.filter((e) => e.mode === 'review').length;
+  const planNew = plan.filter((e) => e.mode === 'first' && ITEM_BY_ID.get(e.id)?.kind === 'vocab').length;
+  const heldBack = c.due - planReviews;
   app.innerHTML = `
     <header class="home-head">
       <h1>Olá! 👋</h1>
@@ -154,7 +162,7 @@ function renderHome() {
       <h2>Today</h2>
       <div class="stat-row">
         <div><span class="num">${c.due}</span><span class="lbl">reviews due</span></div>
-        <div><span class="num">${c.newToday}</span><span class="lbl">new words</span></div>
+        <div><span class="num">${nothing ? 0 : planNew}</span><span class="lbl">new words</span></div>
         <div><span class="num">${today.reviews}</span><span class="lbl">done today</span></div>
       </div>
       ${nothing
@@ -164,12 +172,14 @@ function renderHome() {
              ${c.unseen ? '<button class="btn" data-act="more">+5 new words</button>' : ''}
            </div>`
         : `<button class="btn primary big" data-act="start">${today.reviews ? 'Continue' : 'Start today\'s session'}</button>
-           <p class="muted small">About ${Math.max(2, Math.round((c.due * 8 + c.newToday * 40) / 60))} min</p>`}
+           <p class="muted small">About ${estimateMinutes(plan)} min${heldBack > 0
+             ? ` · ${heldBack} review${heldBack === 1 ? '' : 's'} saved for a second round (session length is set to ${state.settings.sessionMinutes} min)`
+             : planNew < c.newToday && state.settings.sessionMinutes ? ' · fewer new words today so reviews fit your session length' : ''}</p>`}
     </section>
     <section class="card">
       <h2>Progress</h2>
       <p>${c.learned} of ${UNITS.reduce((n, u) => n + u.items.length, 0)} words and phrases started.</p>
-      <p class="muted small">Your reviews are scheduled to keep each item at about ${Math.round(state.settings.retention * 100)}% recall.</p>
+      <p class="muted small">Your reviews are scheduled to keep each item at about ${Math.round(state.settings.retention * 100)}% recall. <a href="#/stats">See your stats ›</a></p>
       <p class="muted small">🎤 Speaking: ${speakingEnabled()
         ? `on (${sttEngine() === 'openrouter' ? 'OpenRouter Whisper' : 'phone recogniser'})`
         : state.settings.speaking ? 'no speech engine available. Add an OpenRouter key in Settings, or use Chrome on Android.' : 'off'}</p>
@@ -448,7 +458,9 @@ function renderUnits() {
   const unitCards = UNITS.map((u) => {
     const started = u.items.filter((i) => state.cards.has(i.id)).length;
     const known = u.items.filter((i) => itemStatus(i.id)[0] === 'known').length;
-    return `<a class="card unit-card" href="#/unit/${u.n}">
+    const head = u.n === 1 ? '<h2 class="level-head">A1 · Beginner</h2>'
+      : levelOf(u.n) !== levelOf(u.n - 1) ? `<h2 class="level-head">${levelOf(u.n)} · Elementary</h2>` : '';
+    return `${head}<a class="card unit-card" href="#/unit/${u.n}">
       <div class="unit-n">${u.n}</div>
       <div class="unit-info"><h3>${esc(u.title)}</h3><p class="muted small">${esc(u.subtitle)} · ${started}/${u.items.length} started · ${known} known</p>
       <div class="progress thin"><div style="width:${(started / u.items.length) * 100}%"></div></div></div></a>`;
@@ -483,14 +495,21 @@ function renderSettings() {
   const s = state.settings;
   const voices = portugueseVoices();
   const cur = chosenVoice(s);
+  const lengths = [[10, 'Short: about 10 min'], [20, 'Normal: about 20 min'], [30, 'Long: about 30 min'], [0, 'No limit']];
   app.innerHTML = `<h1>Settings</h1>
     <section class="card form">
-      <label>New words per day <output>${s.newPerDay}</output>
+      <h2>Learning</h2>
+      <label>Session length
+        <select name="sessionMinutes">${lengths.map(([v, l]) => `<option value="${v}" ${s.sessionMinutes === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <p class="muted small">Reviews always come first. New words fill the time that's left, so a big backlog never snowballs. Leftover reviews wait for "Keep going".</p>
+      <label>New words per day (max) <output>${s.newPerDay}</output>
         <input type="range" min="3" max="25" step="1" name="newPerDay" value="${s.newPerDay}"></label>
-      <p class="muted small">10 is a good default. More new words means more reviews later on.</p>
+      <p class="muted small">10 is a good default. Each new word adds roughly 5–8 reviews over the next month.</p>
+      <label>New ear-training items per day <output>${s.earNewPerDay}</output>
+        <input type="range" min="0" max="5" step="1" name="earNewPerDay" value="${s.earNewPerDay}"></label>
       <label>Target recall <output>${Math.round(s.retention * 100)}%</output>
         <input type="range" min="0.8" max="0.95" step="0.01" name="retention" value="${s.retention}"></label>
-      <p class="muted small">Higher means more frequent reviews. 90% is the usual sweet spot.</p>
+      <p class="muted small" data-out="retention"></p>
       <label class="switch"><input type="checkbox" name="noTyping" ${s.noTyping ? 'checked' : ''}> No typing (use tiles and choices)</label>
     </section>
     <section class="card form">
@@ -546,12 +565,24 @@ function renderSettings() {
     </section>
     <p class="muted small center">Português · v${window.APP_VERSION || ''}</p>`;
 
+  const retOut = app.querySelector('[data-out="retention"]');
+  const showRetention = () => {
+    // Review load scales roughly with 1 / interval; compare with the 90% default.
+    const load = intervalFor(10, 0.9) / intervalFor(10, s.retention);
+    const rel = Math.abs(load - 1) < 0.05 ? 'The usual sweet spot between effort and forgetting.'
+      : load > 1 ? `About ${load.toFixed(1)}× the reviews of 90%: you'll forget less, but it costs time.`
+        : `About ${Math.round((1 - load) * 100)}% fewer reviews than 90%, but you'll forget more often.`;
+    retOut.textContent = `${rel} Applies from each item's next review.`;
+  };
+  showRetention();
   app.querySelectorAll('input[type="range"]').forEach((r) => r.addEventListener('input', () => {
     const out = r.parentElement.querySelector('output');
     out.textContent = r.name === 'retention' ? `${Math.round(r.value * 100)}%` : r.name === 'handsFreePause' ? `${r.value}s` : r.value;
     s[r.name] = Number(r.value);
+    if (r.name === 'retention') showRetention();
     store.saveSettings();
   }));
+  app.querySelector('[name="sessionMinutes"]').addEventListener('change', (e) => { s.sessionMinutes = Number(e.target.value); store.saveSettings(); });
   app.querySelector('[name="noTyping"]').addEventListener('change', (e) => { s.noTyping = e.target.checked; store.saveSettings(); });
 
   const engineOut = app.querySelector('[data-out="engine"]');

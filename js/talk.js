@@ -2,7 +2,7 @@
 
 import { SCENARIOS, SCENARIO_BY_ID } from './scenarios.js';
 import { AiConversation, ScriptedConversation, DEFAULT_TUTOR_MODEL } from './tutor.js';
-import { ITEM_BY_ID, UNITS } from './content.js';
+import { UNITS, levelOf } from './content.js';
 import { esc, ICON } from './exercises.js';
 
 const MIC = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
@@ -31,10 +31,11 @@ export function renderTalkList(app, d) {
     <p class="muted">Short role-plays using the words you're learning. ${hasKey
       ? 'With the AI tutor you can say anything. It nudges you to fix mistakes yourself.'
       : 'Add an OpenRouter key in Settings for the free-form AI tutor. Guided practice scripts work offline.'}</p>
-    ${SCENARIOS.map((s) => `
+    ${[rec, ...SCENARIOS.filter((s) => s !== rec)].map((s, i) => `
+      ${i === 1 ? '<h2 class="level-head">All role-plays</h2>' : ''}
       <section class="card scenario ${s.id === rec.id ? 'rec' : ''}">
         <div class="scen-head"><span class="scen-emoji">${s.emoji}</span>
-          <div><h3>${esc(s.title)}</h3><p class="muted small">Unit ${s.unit} · ${esc(s.goals.join(' · '))}</p></div></div>
+          <div><h3>${esc(s.title)}</h3><p class="muted small">Unit ${s.unit} · ${levelOf(s.unit)} · ${esc(s.goals.join(' · '))}</p></div></div>
         ${s.id === rec.id ? '<p class="tag">Recommended</p>' : ''}
         <div class="row">
           ${hasKey ? `<a class="btn primary small" href="#/talk/${s.id}/ai">Talk with the AI tutor</a>` : ''}
@@ -48,7 +49,8 @@ export function renderTalk(app, id, mode, d) {
   if (!scenario) return d.go('talk', true);
   const s = d.state.settings;
   const ai = mode === 'ai' && !!s.apiKey;
-  const known = [...d.state.cards.values()].filter((c) => c.s && ITEM_BY_ID.get(c.id)?.kind === 'vocab').map((c) => ITEM_BY_ID.get(c.id).pt);
+  // In course order, so the prompt's "most recent 200" are the newest units
+  const known = UNITS.flatMap((u) => u.items).filter((i) => d.state.cards.get(i.id)?.s).map((i) => i.pt);
   const conv = ai
     ? new AiConversation(scenario, { key: s.apiKey, model: s.tutorModel || DEFAULT_TUTOR_MODEL, known })
     : new ScriptedConversation(scenario);

@@ -40,6 +40,22 @@ const EAR_ORDER = (() => {
   return out;
 })();
 
+// ---------- time estimates (seconds), used for session length ----------
+
+export const COST = { review: 10, earReview: 7, earNew: 25, newItem: 45, lesson: 40 };
+
+/** Rough length of a queue in minutes (re-asks after mistakes not included). */
+export function estimateMinutes(queue) {
+  let s = 0;
+  for (const e of queue) {
+    const kind = ITEM_BY_ID.get(e.id)?.kind;
+    if (e.mode === 'lesson') s += COST.lesson;
+    else if (e.mode === 'review') s += kind === 'vocab' ? COST.review : COST.earReview;
+    else if (e.mode === 'first') s += kind === 'vocab' ? COST.newItem : COST.earNew;
+  }
+  return Math.max(1, Math.round(s / 60));
+}
+
 // ---------- counts for the home screen ----------
 
 export function counts(st, today, now = Date.now()) {
@@ -69,26 +85,40 @@ export function counts(st, today, now = Date.now()) {
 export function buildQueue(st, today, { extraNew = 0, practice = false, now = Date.now(), rand = Math.random } = {}) {
   const day = dayNumber(now);
   const q = [];
+  // Session length: reviews come first (they protect what you know), new material fills what's left.
+  // "+5 new words" and practice ignore the limit: you asked for them explicitly.
+  const minutes = st.settings.sessionMinutes || 0;
+  let budget = !practice && !extraNew && minutes > 0 ? minutes * 60 : Infinity;
+  const isVocab = (c) => ITEM_BY_ID.get(c.id).kind === 'vocab';
 
   // 1) reviews, interleaved across units
   let due = [...st.cards.values()].filter((c) => ITEM_BY_ID.has(c.id) && c.due != null && (practice || c.due <= day));
   due.sort((a, b) => recallNow(a, now) - recallNow(b, now)); // most-forgotten first
   due = due.slice(0, practice ? 15 : st.settings.maxReviews);
-  const dueVocab = shuffle(due.filter((c) => ITEM_BY_ID.get(c.id).kind === 'vocab'), rand);
-  const dueEar = due.filter((c) => ITEM_BY_ID.get(c.id).kind !== 'vocab');
+  const fits = [];
+  for (const c of due) {
+    const cost = isVocab(c) ? COST.review : COST.earReview;
+    if (cost > budget && fits.length) break;
+    budget -= cost;
+    fits.push(c);
+  }
+  const dueVocab = shuffle(fits.filter(isVocab), rand);
+  const dueEar = fits.filter((c) => !isVocab(c));
   dueVocab.forEach((c) => q.push({ id: c.id, mode: 'review' }));
 
   // 2) ear training: due + a couple of new ones
   shuffle(dueEar, rand).forEach((c) => q.push({ id: c.id, mode: 'review' }));
   if (!practice) {
-    const earLeft = Math.max(0, st.settings.earNewPerDay - (today.newEar || 0));
+    const earLeft = Math.max(0, Math.min(st.settings.earNewPerDay - (today.newEar || 0), Math.floor(budget / COST.earNew)));
     EAR_ORDER.filter((e) => !st.cards.has(e.id)).slice(0, earLeft).forEach((e) => {
+      budget -= COST.earNew;
       q.push({ id: e.id, mode: 'intro' }, { id: e.id, mode: 'first' });
     });
   }
 
   // 3) new vocabulary, introduced in a themed block (not interleaved: better for first learning)
-  const newCount = practice ? extraNew : Math.max(0, st.settings.newPerDay - (today.newItems || 0)) + extraNew;
+  let newCount = practice ? extraNew : Math.max(0, st.settings.newPerDay - (today.newItems || 0)) + extraNew;
+  newCount = Math.min(newCount, Math.floor(budget / COST.newItem));
   const fresh = UNITS.flatMap((u) => u.items).filter((i) => !st.cards.has(i.id)).slice(0, newCount);
   const lessonsQueued = new Set();
   fresh.forEach((item, i) => {
@@ -228,6 +258,15 @@ export class Session {
     this.reasks = new Map();
     this.gradedToday = new Set();
     this.summary = { graded: 0, correct: 0, newItems: 0, mistakes: [] };
+    this.lastAction = now();
+  }
+
+  /** Practice time, counted between actions; long pauses (phone put down) count as 2 minutes at most. */
+  tick() {
+    const t = this.now();
+    const today = this.store.todayStats();
+    today.seconds = (today.seconds || 0) + Math.min(Math.max(0, t - this.lastAction), 120000) / 1000;
+    this.lastAction = t;
   }
 
   get done() { return this.pos >= this.queue.length; }
@@ -245,6 +284,7 @@ export class Session {
   /** Lesson or intro screen finished. */
   async acknowledge() {
     const e = this.current;
+    this.tick();
     if (e.mode === 'lesson') await this.store.markLessonSeen(e.lessonId);
     this.pos++;
   }
@@ -255,6 +295,7 @@ export class Session {
     const item = this.item(e);
     const { state } = this.store;
     const graded = (e.mode === 'review' || e.mode === 'first') && !this.gradedToday.has(e.id);
+    this.tick();
 
     if (graded) {
       this.gradedToday.add(e.id);
@@ -266,6 +307,11 @@ export class Session {
       const today = this.store.todayStats();
       today.reviews++;
       if (result === 'correct' || result === 'accent') today.correct++;
+      if (e.mode === 'review' && item.kind === 'vocab' && prev.s) {
+        // Measured recall on real reviews (what the retention target is about). "Almost" counts as remembered.
+        today.recallN = (today.recallN || 0) + 1;
+        if (result !== 'wrong') today.recallOk = (today.recallOk || 0) + 1;
+      }
       if (e.mode === 'first') {
         if (item.kind === 'vocab') { today.newItems++; this.summary.newItems++; }
         else today.newEar = (today.newEar || 0) + 1;

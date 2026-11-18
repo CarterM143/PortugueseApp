@@ -46,18 +46,28 @@ Set a credit limit on the key at openrouter.ai → Settings → Keys, just in ca
 
 ## Talk (conversation practice)
 
-The **Talk** tab has five short role-plays, one per unit: neighbour, language exchange, shop, pastelaria and family.
+The **Talk** tab has 20 short role-plays, one per unit (neighbour, pastelaria, directions, market, pharmacy, restaurant, booking an appointment and more). The one that matches your progress is shown first.
 
 - **AI tutor** (needs a key): say or type anything. The tutor stays in character, uses words you know, and nudges you to correct mistakes yourself. **Help me say it** gives you the Portuguese for what you want to say. **Hands-free** listens automatically and stops when you pause; the pause length is set in Settings.
 - **Guided practice** (no key, works offline): scripted lines with a hint ladder.
 
 The tutor model can be changed in Settings. The default is open-weight Voxtral Small.
 
+## Stats and learning settings
+
+The **Stats** tab shows your streak, words known and learning, how much you actually remembered in reviews compared with your target, a 14-day review forecast, the last 30 days of practice, progress by unit, and the words you forget most.
+
+Under **Settings → Learning** you can set:
+
+- **Session length:** reviews come first, and new words fill the time that's left.
+- **New words per day** and **new ear-training items per day.**
+- **Target recall:** the app shows what each setting costs in reviews.
+
 ## Your data
 
 Your progress is stored only on your phone (in IndexedDB). It is never put in this repository. Use **Settings → Export backup** now and then.
 
-Don't commit API keys to this repository: it's public. The AI tutor, coming in a later phase, will keep your OpenRouter key on the phone only.
+Don't commit API keys to this repository: it's public. The app keeps your OpenRouter key on the phone only and leaves it out of backups.
 
 ## Structure
 
@@ -65,11 +75,13 @@ Don't commit API keys to this repository: it's public. The AI tutor, coming in a
 |---|---|
 | `index.html`, `css/style.css` | App shell and styles |
 | `js/app.js` | Screens: home, session, units, settings |
-| `js/session.js` | Daily queue, adaptive difficulty, re-asking missed items |
+| `js/stats.js` | Stats calculations and the Stats screen |
+| `js/talk.js`, `js/tutor.js`, `js/scenarios.js` | Talk tab: AI tutor, guided practice, role-plays |
+| `js/speech.js`, `js/recorder.js`, `js/pronounce.js`, `js/openrouter.js` | Voice output, recording, speech marking, OpenRouter calls |
+| `js/session.js` | Daily queue, session length, adaptive difficulty, re-asking missed items |
 | `js/fsrs.js` | FSRS-4.5 spaced-repetition scheduler |
 | `js/grade.js` | Forgiving answer marking (accents, typos, articles) |
 | `js/exercises.js` | Exercise screens |
-| `js/content.js` | Units 1–5 and ear-training items |
-| `js/speech.js` | Text-to-speech (prefers pt-PT voices) |
+| `js/content.js`, `js/content-a1.js`, `js/content-a2.js` | Units 1–20 and ear-training items |
 | `js/store.js` | IndexedDB storage, backup and restore |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline support and installability |

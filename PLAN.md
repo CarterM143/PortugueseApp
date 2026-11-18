@@ -132,7 +132,13 @@ Content is written for **Portugal**: *tu* for friends and *você* or *o senhor/a
    - Guided-practice scripts with the same hint ladder work offline and without a key.
 
    Originally planned as: role-plays, the prompt-first correction ladder, "Help me say it", hands-free mode and AI-generated extra sentences.
-4. **Phase 4, depth:** units 6–20, stats such as retention and forecast, and settings for the retention target, daily new-item cap and session length.
+4. **Phase 4, depth (status: done, v0.4):**
+   - Units 6–20 (about 480 more items, 30 grammar notes), grouped as A1 (1–10) and A2 (11–20).
+   - 15 more role-plays, one per unit. The AI tutor pitches its language at A1 or A2 to match the scenario.
+   - A Stats tab: streak, words known / learning, measured recall on reviews against your target, estimated recall of all words, a 14-day review forecast, 30-day activity, progress by unit and the trickiest words.
+   - Settings for session length (reviews first, new words fill the rest, so a backlog can't snowball), new words and ear items per day, and target recall, with the review cost of that target shown.
+
+   Originally planned as: units 6–20, stats such as retention and forecast, and settings for the retention target, daily new-item cap and session length. Units came out at about 30–35 items rather than 40–60, so each one fits in roughly 3–4 days at the default pace.
 
 ---
 

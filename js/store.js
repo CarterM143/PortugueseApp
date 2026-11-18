@@ -13,6 +13,7 @@ export const DEFAULT_SETTINGS = {
   voiceURI: null,      // chosen pt-PT voice
   noTyping: false,     // tiles / choices instead of typing
   maxReviews: 120,     // safety cap per session
+  sessionMinutes: 20,  // session length budget (0 = no limit); reviews first, new words fill the rest
   // Speaking & AI (Phase 2)
   speaking: true,      // include speaking exercises when a speech engine is available
   sttEngine: 'auto',   // auto | openrouter | phone
@@ -58,7 +59,8 @@ async function run(storeName, mode, fn) {
 export const state = {
   cards: new Map(),            // id -> {id, s, d, due, last, reps, lapses, rung, hook}
   settings: { ...DEFAULT_SETTINGS },
-  stats: { days: {}, recent: [] }, // days: {'YYYY-MM-DD': {reviews, correct, newItems}}
+  // days: {'YYYY-MM-DD': {reviews, correct, newItems, newEar, recallN, recallOk, seconds, talks, talkMinutes}}
+  stats: { days: {}, recent: [] },
   seenLessons: new Set(),
 };
 

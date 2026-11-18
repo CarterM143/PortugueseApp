@@ -6,6 +6,7 @@ import { UNITS, EAR, ALL_ITEMS, LESSON_BY_ID } from '../js/content.js';
 import { buildQueue, chooseExercise, easierExercise, distractors, tilesFor, Session, counts, adaptiveOffset } from '../js/session.js';
 import { assessSpeech, phoneticKey, spokenText, soundFeatures, SOUND_FEATURES } from '../js/pronounce.js';
 import { parseJsonReply } from '../js/openrouter.js';
+import * as sessionExtras from '../js/session.js';
 
 const DAY = 86400000;
 
@@ -92,7 +93,11 @@ test('content: ids unique, lessons exist, fields present', () => {
     if (i.lesson) assert.ok(LESSON_BY_ID.has(i.lesson), `missing lesson ${i.lesson}`);
     if (i.kind === 'stress') assert.ok(i.stress >= 0 && i.stress < i.syl.length);
   }
-  assert.ok(UNITS.length === 5);
+  assert.equal(UNITS.length, 20);
+  UNITS.forEach((u, i) => assert.equal(u.n, i + 1));
+  for (const u of UNITS) for (const l of u.lessons) {
+    assert.ok(u.items.some((i) => i.lesson === l.id), `lesson ${l.id} is never introduced`);
+  }
   assert.ok(EAR.length >= 20);
 });
 
@@ -180,6 +185,82 @@ test('session: wrong answers get re-asked later, max 3 times', async () => {
   assert.equal(reasks, 3);
   const card = [...st.state.cards.values()][0];
   assert.equal(card.rung, 1); // stepped down
+});
+
+test('session length: reviews first, new words fill the remaining time', () => {
+  const { estimateMinutes, COST } = sessionExtras;
+  const st = fakeStore({ sessionMinutes: 10 });
+  const day = dayNumber(Date.now());
+  // 100 due vocab reviews = ~17 min: more than the 10-minute budget
+  const vocab = UNITS.flatMap((u) => u.items).slice(0, 100);
+  vocab.forEach((i) => st.state.cards.set(i.id, { id: i.id, s: 5, d: 5, last: Date.now() - 6 * DAY, due: day, rung: 3 }));
+  let q = buildQueue(st.state, st.today);
+  const reviews = q.filter((e) => e.mode === 'review').length;
+  assert.equal(reviews, Math.floor((10 * 60) / COST.review));
+  assert.equal(q.filter((e) => e.mode === 'intro').length, 0); // no time left for new words
+  assert.ok(estimateMinutes(q) <= 10);
+  // "+5 new words" ignores the limit
+  q = buildQueue(st.state, st.today, { extraNew: 5 });
+  assert.equal(q.filter((e) => e.mode === 'review').length, 100);
+  // No limit
+  st.state.settings.sessionMinutes = 0;
+  assert.equal(buildQueue(st.state, st.today).filter((e) => e.mode === 'review').length, 100);
+  // Small backlog: everything fits, new words still come
+  const st2 = fakeStore({ sessionMinutes: 20 });
+  vocab.slice(0, 10).forEach((i) => st2.state.cards.set(i.id, { id: i.id, s: 5, d: 5, last: Date.now() - 6 * DAY, due: day, rung: 3 }));
+  q = buildQueue(st2.state, st2.today);
+  assert.equal(q.filter((e) => e.mode === 'review').length, 10);
+  assert.equal(q.filter((e) => e.mode === 'first' && e.id.startsWith('u')).length, 10);
+});
+
+test('session tracks practice time and measured recall on reviews', async () => {
+  const st = fakeStore();
+  const item = UNITS[0].items[0];
+  st.state.cards.set(item.id, { id: item.id, s: 3, d: 5, last: Date.now() - 3 * DAY, due: dayNumber(Date.now()), rung: 3 });
+  let t = 0;
+  const s = new Session(st, [{ id: item.id, mode: 'review' }], { now: () => t });
+  t = 30000;
+  await s.answer('almost');
+  assert.equal(st.today.seconds, 30);
+  assert.equal(st.today.recallN, 1);
+  assert.equal(st.today.recallOk, 1); // "almost" still counts as remembered
+  const s2 = new Session(st, [{ id: UNITS[0].items[1].id, mode: 'first' }], { now: () => t });
+  t += 10 * 60000; // phone put down for 10 minutes
+  await s2.answer('wrong');
+  assert.equal(st.today.seconds, 150); // capped at 2 minutes
+  assert.equal(st.today.recallN, 1); // first recalls don't count
+});
+
+test('stats: forecast, stages, recall', async () => {
+  const { forecast, stages, averageRecall, measuredRecall, lastDays, minutesIn, hardest } = await import('../js/stats.js');
+  const now = Date.now();
+  const day = dayNumber(now);
+  const ids = UNITS[0].items.map((i) => i.id);
+  const cards = [
+    { id: ids[0], s: 30, last: now, due: day - 2, lapses: 0 }, // overdue → today
+    { id: ids[1], s: 2, last: now - DAY, due: day + 1, lapses: 3 },
+    { id: ids[2], s: 2, last: now - DAY, due: day + 20, lapses: 2 }, // beyond 14 days
+    { id: 'gone-item', s: 2, due: day },
+  ];
+  const f = forecast(cards, now, 14);
+  assert.equal(f.length, 14);
+  assert.deepEqual([f[0], f[1]], [1, 1]);
+  assert.equal(f.reduce((a, b) => a + b, 0), 2);
+  const sg = stages(cards);
+  assert.equal(sg.known, 1);
+  assert.equal(sg.learning, 2);
+  assert.equal(sg.known + sg.learning + sg.notStarted, sg.total);
+  const avg = averageRecall(cards, now);
+  assert.ok(avg > 0.5 && avg <= 1);
+  assert.equal(averageRecall([], now), null);
+  const days = { a: { recallN: 10, recallOk: 9, seconds: 600, talkMinutes: 5 }, b: { recallN: 10, recallOk: 7 } };
+  const list = lastDays(days, (d) => (d.getTime() === now ? 'a' : 'b'), 3, now);
+  assert.equal(list.length, 3);
+  assert.equal(list[2].key, 'a');
+  assert.equal(measuredRecall([days.a, days.b]).rate, 0.8);
+  assert.equal(measuredRecall([{}]).rate, null);
+  assert.equal(minutesIn([days.a]), 15);
+  assert.deepEqual(hardest(cards).map((c) => c.lapses), [3, 2]);
 });
 
 test('adaptive difficulty targets ~85%', () => {
@@ -290,7 +371,9 @@ test('parseJsonReply tolerates chatter around JSON', () => {
 test('scenarios: every scripted model answer passes its own check', async () => {
   const { SCENARIOS } = await import('../js/scenarios.js');
   const { checkScripted } = await import('../js/tutor.js');
-  assert.equal(SCENARIOS.length, 5);
+  assert.equal(SCENARIOS.length, 20);
+  for (const u of UNITS) assert.ok(SCENARIOS.some((s) => s.unit === u.n), `no scenario for unit ${u.n}`);
+  assert.equal(new Set(SCENARIOS.map((s) => s.id)).size, SCENARIOS.length);
   for (const s of SCENARIOS) {
     assert.ok(s.goals.length && s.script.length && s.opening.pt && s.closing.pt, s.id);
     for (const t of s.script) {

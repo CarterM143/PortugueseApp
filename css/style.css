@@ -325,9 +325,38 @@ details summary { cursor: pointer; font-weight: 600; }
   padding: 6px 0 calc(6px + env(safe-area-inset-bottom));
 }
 #nav[hidden] { display: none; }
-#nav a { display: grid; justify-items: center; text-decoration: none; color: var(--muted); font-size: 0.75rem; font-weight: 600; padding: 4px 16px; }
+#nav a { flex: 1; display: grid; justify-items: center; text-decoration: none; color: var(--muted); font-size: 0.75rem; font-weight: 600; padding: 4px 2px; }
 #nav a span { font-size: 1.3rem; }
 #nav a.active { color: var(--accent); }
+
+.level-head { font-size: 0.9rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 20px 4px 8px; }
+
+/* stats */
+.stat-row.two { grid-template-columns: repeat(2, 1fr); }
+.progress.stacked { display: flex; flex: none; height: 12px; gap: 2px; margin: 8px 0 4px; }
+.progress.stacked.thin { height: 6px; margin: 6px 0 0; }
+.progress.stacked > * { display: block; height: 100%; border-radius: 0; transition: none; }
+.progress.stacked .known { background: var(--accent); }
+.progress.stacked .learning { background: color-mix(in srgb, var(--accent) 40%, var(--surface)); }
+.chart { margin: 0; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart .bar { fill: var(--accent); }
+.chart .bar-g .hit { fill: transparent; }
+.chart .bar-g { cursor: pointer; outline: none; }
+.chart .bar-g.on .hit, .chart .bar-g:focus-visible .hit { fill: color-mix(in srgb, var(--text) 7%, transparent); }
+.chart .axis { stroke: var(--border); stroke-width: 1; }
+.chart .grid { stroke: var(--border); stroke-width: 1; stroke-dasharray: 2 3; }
+.chart .tick { fill: var(--muted); font-size: 11px; }
+.chart-read { min-height: 1.3em; margin: 0 0 6px; color: var(--text); }
+.chart-table table { width: 100%; font-size: 0.85rem; border-collapse: collapse; margin-top: 6px; }
+.chart-table td { padding: 2px 4px; border-bottom: 1px solid var(--border); }
+.chart-table td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.unit-stats { list-style: none; padding: 0; margin: 0; }
+.unit-stats li { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.unit-stats li:last-child { border-bottom: 0; }
+.unit-stats .u-num { min-width: 1.6em; color: var(--muted); font-weight: 700; padding-top: 2px; }
+.unit-stats .grow { flex: 1; display: grid; gap: 2px; }
+.unit-stats .chip { font-size: 0.7rem; }
 
 .toast { position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%); background: var(--text); color: var(--bg);
   padding: 10px 16px; border-radius: 999px; font-size: 0.9rem; z-index: 10; }

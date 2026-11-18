@@ -1,4 +1,5 @@
 // Course content: European Portuguese (pt-PT), units 1–5 + ear training.
+// Units 6–10 live in content-a1.js and 11–20 in content-a2.js.
 //
 // Item fields:
 //   pt      the Portuguese (what you learn to produce)
@@ -8,6 +9,9 @@
 //   lesson  id of a grammar lesson to show before this item is first introduced
 //
 // IDs are derived from unit + Portuguese text, so editing `pt` resets that item's progress.
+
+import { UNITS_6_10 } from './content-a1.js';
+import { UNITS_11_20 } from './content-a2.js';
 
 function slug(s) {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
@@ -279,7 +283,12 @@ export const UNITS = [
 <p>Listen closely to the difference. You'll practise it in ear training too.</p>`,
     },
   ]),
+
+  ...[...UNITS_6_10, ...UNITS_11_20].map((u) => unit(u.n, u.title, u.subtitle, u.items, u.lessons)),
 ];
+
+/** CEFR level a unit aims at (shown on the units screen and used by the tutor). */
+export const levelOf = (n) => (n <= 10 ? 'A1' : 'A2');
 
 // ---- Ear training (perception) ----
 // pair:   hear one of two similar words, pick which one
