@@ -49,9 +49,21 @@ export async function transcribe(key, b64, { model = DEFAULT_MODELS.stt, languag
   return (j?.text || '').trim();
 }
 
-/** Chat completion; returns the assistant text. Content may include audio parts. */
-export async function chat(key, messages, { model, temperature = 0.3, max_tokens = 500 } = {}) {
-  const j = await request(key, '/chat/completions', { body: { model, messages, temperature, max_tokens } });
+/**
+ * Chat completion; returns the assistant text. Content may include audio parts.
+ * json: ask for a JSON object (falls back automatically if the model doesn't support it).
+ */
+export async function chat(key, messages, { model, temperature = 0.3, max_tokens = 500, json = false } = {}) {
+  const body = { model, messages, temperature, max_tokens };
+  let j;
+  if (json) {
+    try {
+      j = await request(key, '/chat/completions', { body: { ...body, response_format: { type: 'json_object' } } });
+    } catch (err) {
+      if (err.status !== 400 && err.status !== 404) throw err; // parameter not supported → retry plain
+    }
+  }
+  if (!j) j = await request(key, '/chat/completions', { body });
   const c = j?.choices?.[0]?.message?.content;
   return Array.isArray(c) ? c.map((p) => p.text || '').join('') : (c || '');
 }
@@ -78,8 +90,29 @@ If it was good, give one tip at most, or an empty list.`;
       { type: 'text', text: prompt },
       { type: 'input_audio', input_audio: { data: b64, format: 'wav' } },
     ],
-  }], { model, temperature: 0.2, max_tokens: 400 });
+  }], { model, temperature: 0.2, max_tokens: 400, json: true });
   return parseJsonReply(reply) || { heard: '', verdict: 'unclear', tips: [reply.trim().slice(0, 300)] };
+}
+
+/** Two short example sentences using an item. */
+export async function exampleSentences(key, item, { model }) {
+  const reply = await chat(key, [{
+    role: 'user',
+    content: `Write 2 short, natural example sentences in EUROPEAN Portuguese (Portugal, not Brazil) for an A1 beginner, each using "${item.pt}" (meaning: ${item.en}). Use simple, common words.
+Reply with JSON only: {"examples": [{"pt": "...", "en": "..."}]}`,
+  }], { model, temperature: 0.6, max_tokens: 300, json: true });
+  const j = parseJsonReply(reply);
+  return (j?.examples || []).filter((e) => e?.pt).slice(0, 3);
+}
+
+/** A vivid memory-hook suggestion (keyword-mnemonic style). */
+export async function suggestHook(key, item, { model }) {
+  const reply = await chat(key, [{
+    role: 'user',
+    content: `Create one short, vivid, slightly silly mental image (a keyword mnemonic) that helps an English speaker remember that the European Portuguese "${item.pt}" means "${item.en}". Link how it SOUNDS to its meaning. Max 25 words.
+Reply with JSON only: {"hook": "..."}`,
+  }], { model, temperature: 0.9, max_tokens: 150, json: true });
+  return parseJsonReply(reply)?.hook || reply.trim().slice(0, 200);
 }
 
 /** Key status: usage and limit. */

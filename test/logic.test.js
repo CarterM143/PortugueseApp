@@ -284,3 +284,87 @@ test('parseJsonReply tolerates chatter around JSON', () => {
   assert.deepEqual(parseJsonReply('Sure! {"verdict":"good","tips":[]} hope that helps'), { verdict: 'good', tips: [] });
   assert.equal(parseJsonReply('no json here'), null);
 });
+
+// ---------- tutor ----------
+
+test('scenarios: every scripted model answer passes its own check', async () => {
+  const { SCENARIOS } = await import('../js/scenarios.js');
+  const { checkScripted } = await import('../js/tutor.js');
+  assert.equal(SCENARIOS.length, 5);
+  for (const s of SCENARIOS) {
+    assert.ok(s.goals.length && s.script.length && s.opening.pt && s.closing.pt, s.id);
+    for (const t of s.script) {
+      for (const e of t.expect) {
+        assert.ok(checkScripted(t, { text: e }).ok, `${s.id}: typed "${e}"`);
+        assert.ok(checkScripted(t, { transcripts: [e], spoken: true }).ok, `${s.id}: spoken "${e}"`);
+      }
+      assert.ok(!checkScripted(t, { text: 'the weather is nice' }).ok, `${s.id}: nonsense accepted`);
+    }
+  }
+});
+
+test('scripted conversation: hint ladder then moves on', async () => {
+  const { SCENARIOS } = await import('../js/scenarios.js');
+  const { ScriptedConversation } = await import('../js/tutor.js');
+  const c = new ScriptedConversation(SCENARIOS[3]); // pastelaria
+  let r = c.answer({ text: 'xyz' });
+  assert.equal(r.ok, false);
+  assert.match(r.hint, /starting with/);
+  r = c.answer({ text: 'abc' });
+  assert.match(r.hint, /^Say:/);
+  r = c.answer({ text: 'still wrong' }); // third attempt: move on, show answer
+  assert.equal(r.ok, false);
+  assert.ok(r.next && r.answer);
+  r = c.answer({ text: 'um pastel de nata, por favor' });
+  assert.equal(r.ok, true);
+  r = c.answer({ transcripts: ['para comer aqui'], spoken: true });
+  assert.equal(r.ok, true);
+  r = c.answer({ text: 'a conta por favor' });
+  assert.ok(r.closing && c.done);
+  assert.equal(c.goalsDone.size, 4);
+});
+
+test('tutor reply parsing is robust', async () => {
+  const { parseTutorReply } = await import('../js/tutor.js');
+  const ok = parseTutorReply('```json\n{"reply":"Olá!","reply_en":"Hi!","feedback":{"type":"hint","text":"gender"},"retry":true,"goals_done":[0,"x",2],"done":false}\n```');
+  assert.equal(ok.reply, 'Olá!');
+  assert.equal(ok.feedback.type, 'hint');
+  assert.deepEqual(ok.goals_done, [0, 2]);
+  const plain = parseTutorReply('Muito bem! E tu?');
+  assert.equal(plain.reply, 'Muito bem! E tu?');
+  assert.equal(plain.feedback.type, 'none');
+});
+
+test('AI conversation: attempts ladder, goals, audio only for audio models', async () => {
+  const { SCENARIOS } = await import('../js/scenarios.js');
+  const { AiConversation } = await import('../js/tutor.js');
+  const calls = [];
+  const replies = [
+    { reply: 'Quase!', feedback: { type: 'hint', text: 'gender' }, retry: true, goals_done: [] },
+    { reply: 'Quase!', feedback: { type: 'explicit', text: 'use uma' }, retry: true, goals_done: [] },
+    { reply: 'Muito bem.', feedback: { type: 'correction', text: 'x', corrected: 'uma água' }, retry: true, goals_done: [0, 9] },
+    { reply: 'Mais alguma coisa?', feedback: { type: 'none' }, retry: false, goals_done: [0, 1] },
+  ];
+  const chatFn = async (key, messages, opts) => { calls.push({ messages, opts }); return JSON.stringify(replies[calls.length - 1]); };
+  const c = new AiConversation(SCENARIOS[3], { key: 'k', model: 'mistralai/voxtral-small-24b-2507', known: ['um café'], chatFn });
+  await c.send('um água', { spoken: true, audio: { b64: 'AAAA' } });
+  assert.equal(c.attempt, 2);
+  assert.match(calls[0].messages.at(-1).content[0].text, /\[attempt 1\]/);
+  assert.equal(calls[0].messages.at(-1).content[1].type, 'input_audio');
+  assert.ok(calls[0].messages[0].content.includes('um café'));
+  assert.equal(calls[0].opts.json, true);
+  await c.send('um água');
+  assert.equal(c.attempt, 3);
+  const r3 = await c.send('um água');
+  assert.equal(r3.retry, false); // forced: never loop past attempt 3
+  assert.equal(c.attempt, 1);
+  assert.deepEqual([...c.goalsDone], [0]); // goal 9 ignored (out of range)
+  await c.send('sim');
+  assert.deepEqual([...c.goalsDone].sort(), [0, 1]);
+  // history holds text only, no audio
+  assert.ok(c.history.every((m) => typeof m.content === 'string'));
+
+  const t = new AiConversation(SCENARIOS[0], { key: 'k', model: 'deepseek/deepseek-v4-flash', chatFn: async (k, m) => { calls.push({ messages: m }); return '{"reply":"Olá"}'; } });
+  await t.send('ola', { spoken: true, audio: { b64: 'AAAA' } });
+  assert.equal(typeof calls.at(-1).messages.at(-1).content, 'string'); // text-only model: no audio part
+});

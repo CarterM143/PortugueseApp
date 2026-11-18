@@ -44,6 +44,15 @@ Speaking exercises work in either of two ways:
 
 Set a credit limit on the key at openrouter.ai → Settings → Keys, just in case.
 
+## Talk (conversation practice)
+
+The **Talk** tab has five short role-plays, one per unit: neighbour, language exchange, shop, pastelaria and family.
+
+- **AI tutor** (needs a key): say or type anything. The tutor stays in character, uses words you know, and nudges you to correct mistakes yourself. **Help me say it** gives you the Portuguese for what you want to say. **Hands-free** listens automatically and stops when you pause; the pause length is set in Settings.
+- **Guided practice** (no key, works offline): scripted lines with a hint ladder.
+
+The tutor model can be changed in Settings. The default is open-weight Voxtral Small.
+
 ## Your data
 
 Your progress is stored only on your phone (in IndexedDB). It is never put in this repository. Use **Settings → Export backup** now and then.

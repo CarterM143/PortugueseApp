@@ -19,6 +19,10 @@ export const DEFAULT_SETTINGS = {
   apiKey: '',          // OpenRouter key: stays on this device, never exported
   sttModel: 'openai/whisper-large-v3',
   coachModel: 'mistralai/voxtral-small-24b-2507',
+  // Conversation tutor (Phase 3)
+  tutorModel: 'mistralai/voxtral-small-24b-2507',
+  tutorShowEn: false,  // show English under tutor lines automatically
+  handsFreePause: 2.5, // seconds of silence before hands-free stops listening
 };
 
 let dbPromise;
@@ -105,8 +109,9 @@ export function todayStats() {
 export function streak() {
   let n = 0;
   const d = new Date();
-  if (!state.stats.days[todayKey(d)]?.reviews) d.setDate(d.getDate() - 1);
-  while (state.stats.days[todayKey(d)]?.reviews) {
+  const active = (day) => !!(day && (day.reviews || day.talks));
+  if (!active(state.stats.days[todayKey(d)])) d.setDate(d.getDate() - 1);
+  while (active(state.stats.days[todayKey(d)])) {
     n++;
     d.setDate(d.getDate() - 1);
   }

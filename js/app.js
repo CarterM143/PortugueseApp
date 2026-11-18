@@ -11,6 +11,9 @@ import { dayNumber } from './fsrs.js';
 import { AudioCapture, PhoneRecognition, micAvailable, phoneRecognitionAvailable } from './recorder.js';
 import { transcribe, coachPronunciation, keyInfo, COACH_SUGGESTIONS, DEFAULT_MODELS } from './openrouter.js';
 import { assessSpeech, soundFeatures, SOUND_FEATURES } from './pronounce.js';
+import { exampleSentences, suggestHook } from './openrouter.js';
+import { renderTalkList, renderTalk, recommendedScenario } from './talk.js';
+import { TUTOR_SUGGESTIONS, DEFAULT_TUTOR_MODEL } from './tutor.js';
 
 const app = document.getElementById('app');
 const nav = document.getElementById('nav');
@@ -38,11 +41,11 @@ function makeListener() {
   let cap = null;
   return {
     engine,
-    async start() {
+    async start(opts = {}) {
       cap = engine === 'openrouter' ? new AudioCapture() : new PhoneRecognition('pt-PT');
       activeCapture = cap;
       try {
-        await cap.start();
+        await cap.start(opts);
       } catch (err) {
         cap = null;
         activeCapture = null;
@@ -93,15 +96,28 @@ async function noteSoundErrors(missed) {
 
 // ---------------- routing ----------------
 
+let talkCleanup = null;
+
+function talkDeps() {
+  return { state, store, say, stopSpeaking, makeListener, sttEngine, toast, go };
+}
+
 function route() {
-  const [view, arg] = location.hash.replace(/^#\/?/, '').split('/');
+  const [view, arg, arg2] = location.hash.replace(/^#\/?/, '').split('/');
   activeCapture?.cancel();
   activeCapture = null;
-  if (view !== 'session') { stopSpeaking(); }
-  nav.hidden = view === 'session';
+  talkCleanup?.();
+  talkCleanup = null;
+  stopSpeaking();
+  window.scrollTo(0, 0);
+  nav.hidden = view === 'session' || (view === 'talk' && !!arg);
   nav.querySelectorAll('a').forEach((a) => a.classList.toggle('active', a.getAttribute('href') === `#/${view || 'home'}`));
   switch (view) {
     case 'session': return session ? renderSession() : go('home', true);
+    case 'talk':
+      if (!arg) return renderTalkList(app, talkDeps());
+      talkCleanup = renderTalk(app, arg, arg2 || 'script', talkDeps());
+      return;
     case 'units': return renderUnits();
     case 'unit': return renderUnit(arg);
     case 'settings': return renderSettings();
@@ -280,6 +296,8 @@ function showFeedback(result, info, item, type) {
       <div class="en">${esc(item.en)}</div>
       ${why ? `<p class="small">${why}</p>` : ''}
       ${spoken}${coachUI}
+      ${card.examples?.length ? examplesHtml(card.examples)
+        : state.settings.apiKey ? '<button class="btn ghost small" data-act="examples">➕ Example sentences</button><div class="examples-out"></div>' : ''}
       ${item.note ? `<p class="note">${esc(item.note)}</p>` : ''}`;
   } else if (item.kind === 'pair') {
     detail = `<p>${info.heard ? 'You heard' : 'The answer is'} <b class="pt">${esc(info.target || '')}</b>.</p>
@@ -297,7 +315,8 @@ function showFeedback(result, info, item, type) {
       <summary>💡 ${card.hook ? 'Your memory hook' : 'This one keeps slipping. Add a memory hook?'}</summary>
       <p class="small muted">Picture a vivid, silly image that links the sound to the meaning. Your own images work best.</p>
       <textarea rows="2" placeholder="e.g. pequeno-almoço: a PEQUENO (small) meal, AL-MOst lunch">${esc(card.hook || '')}</textarea>
-      <button class="btn small" data-act="save-hook">Save</button>
+      <div class="row"><button class="btn small" data-act="save-hook">Save</button>
+      ${state.settings.apiKey ? '<button class="btn ghost small" data-act="suggest-hook">✨ Suggest one</button>' : ''}</div>
     </details>` : '';
 
   fb.className = `feedback ${cls}`;
@@ -318,6 +337,31 @@ function showFeedback(result, info, item, type) {
     const v = fb.querySelector('textarea').value.trim();
     const c = state.cards.get(item.id);
     if (c) { await store.saveCard({ ...c, hook: v || undefined }); toast('Saved'); }
+  });
+  fb.querySelectorAll('[data-say-ex]').forEach((b) => b.addEventListener('click', () => say(b.dataset.sayEx)));
+  fb.querySelector('[data-act="examples"]')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    const out = fb.querySelector('.examples-out');
+    btn.disabled = true;
+    out.textContent = 'Writing examples…';
+    try {
+      const ex = await exampleSentences(state.settings.apiKey, item, { model: state.settings.tutorModel || DEFAULT_TUTOR_MODEL });
+      const c = state.cards.get(item.id);
+      if (c && ex.length) await store.saveCard({ ...c, examples: ex });
+      btn.remove();
+      out.innerHTML = examplesHtml(ex);
+      out.querySelectorAll('[data-say-ex]').forEach((b) => b.addEventListener('click', () => say(b.dataset.sayEx)));
+    } catch (err) { out.textContent = err.message; btn.disabled = false; }
+  });
+  fb.querySelector('[data-act="suggest-hook"]')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Thinking…';
+    try {
+      fb.querySelector('.hook-box textarea').value = await suggestHook(state.settings.apiKey, item, { model: state.settings.tutorModel || DEFAULT_TUTOR_MODEL });
+      btn.textContent = '✨ Another';
+    } catch (err) { toast(err.message); btn.textContent = '✨ Suggest one'; }
+    btn.disabled = false;
   });
   fb.querySelector('[data-act="my-audio"]')?.addEventListener('click', () => {
     const url = URL.createObjectURL(info.audio.blob);
@@ -344,6 +388,11 @@ function showFeedback(result, info, item, type) {
   cont.addEventListener('click', () => renderSession());
   cont.focus({ preventScroll: true });
   fb.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+
+function examplesHtml(list) {
+  return `<ul class="examples">${list.map((e) => `<li><button class="icon-btn inline" data-say-ex="${esc(e.pt)}" aria-label="Play">${ICON.play}</button>
+    <span><span class="pt">${esc(e.pt)}</span><br><span class="muted small">${esc(e.en || '')}</span></span></li>`).join('')}</ul>`;
 }
 
 function finishSession() {
@@ -373,7 +422,13 @@ function renderDone() {
       ${acc && acc < 75 ? '<p class="small">That was a tough one. The app will ease the exercises a little next time.</p>' : ''}
       ${acc > 92 && s.graded >= 10 ? '<p class="small">Great accuracy. Exercises will get a bit harder to keep you learning.</p>' : ''}
       ${missed.length ? `<h3>Worth another look</h3><ul class="item-list">${missed.map((i) => `<li><span class="pt">${esc(i.pt)}</span><span class="en">${esc(i.en)}</span></li>`).join('')}</ul>` : ''}
-      <button class="btn primary big" data-act="home">Done</button>
+      ${(() => {
+        const sc = recommendedScenario(state);
+        const mode = state.settings.apiKey ? 'ai' : 'script';
+        return `<div class="use-it"><h3>Use it 💬</h3><p class="small muted">A short role-play with today's words: the best way to make them stick.</p>
+          <a class="btn primary" href="#/talk/${sc.id}/${mode}">${sc.emoji} ${esc(sc.title)} (about 5 min)</a></div>`;
+      })()}
+      <button class="btn big" data-act="home">Done</button>
       ${c.due ? `<button class="btn" data-act="again">Keep going (${c.due} due)</button>` : ''}
     </section>`;
   app.querySelector('[data-act="home"]').addEventListener('click', () => go('home'));
@@ -469,8 +524,17 @@ function renderSettings() {
         <label>Pronunciation coach model (must accept audio)
           <input type="text" name="coachModel" value="${esc(s.coachModel)}" list="coach-models" autocapitalize="off" spellcheck="false"></label>
         <datalist id="coach-models">${COACH_SUGGESTIONS.map(([id, label]) => `<option value="${esc(id)}">${esc(label)}</option>`).join('')}</datalist>
+        <label>Conversation tutor model
+          <input type="text" name="tutorModel" value="${esc(s.tutorModel)}" list="tutor-models" autocapitalize="off" spellcheck="false"></label>
+        <datalist id="tutor-models">${TUTOR_SUGGESTIONS.map(([id, label]) => `<option value="${esc(id)}">${esc(label)}</option>`).join('')}</datalist>
+        <p class="muted small">Tutor options: ${TUTOR_SUGGESTIONS.map(([, l]) => esc(l)).join(' · ')}. Voice-capable models also hear your recording, not just the transcript.</p>
         <p class="muted small">Open-weight models by default. Any OpenRouter model ID works. Suggestions: ${COACH_SUGGESTIONS.map(([, l]) => esc(l)).join(' · ')}.</p>
       </details>
+      <h3>Conversation</h3>
+      <label class="switch"><input type="checkbox" name="tutorShowEn" ${s.tutorShowEn ? 'checked' : ''}> Always show English under the tutor's lines</label>
+      <label>Hands-free: pause before I stop listening <output>${s.handsFreePause}s</output>
+        <input type="range" min="1.5" max="6" step="0.5" name="handsFreePause" value="${s.handsFreePause}"></label>
+      <p class="muted small">Speak slowly or need thinking time? Make the pause longer.</p>
       <p class="muted small">Your key is stored only on this phone and is never included in backups. Recordings go to OpenRouter only when it is the speech engine or when you ask for pronunciation tips. Tip: set a credit limit on the key at openrouter.ai → Settings → Keys.</p>
     </section>
     <section class="card form">
@@ -484,7 +548,7 @@ function renderSettings() {
 
   app.querySelectorAll('input[type="range"]').forEach((r) => r.addEventListener('input', () => {
     const out = r.parentElement.querySelector('output');
-    out.textContent = r.name === 'retention' ? `${Math.round(r.value * 100)}%` : r.value;
+    out.textContent = r.name === 'retention' ? `${Math.round(r.value * 100)}%` : r.name === 'handsFreePause' ? `${r.value}s` : r.value;
     s[r.name] = Number(r.value);
     store.saveSettings();
   }));
@@ -501,9 +565,11 @@ function renderSettings() {
   showEngine();
   app.querySelector('[name="speaking"]').addEventListener('change', (e) => { s.speaking = e.target.checked; store.saveSettings(); showEngine(); });
   app.querySelector('[name="sttEngine"]').addEventListener('change', (e) => { s.sttEngine = e.target.value; store.saveSettings(); showEngine(); });
-  ['apiKey', 'sttModel', 'coachModel'].forEach((name) => {
+  app.querySelector('[name="tutorShowEn"]').addEventListener('change', (e) => { s.tutorShowEn = e.target.checked; store.saveSettings(); });
+  const defaults = { apiKey: '', sttModel: DEFAULT_MODELS.stt, coachModel: DEFAULT_MODELS.coach, tutorModel: DEFAULT_TUTOR_MODEL };
+  ['apiKey', 'sttModel', 'coachModel', 'tutorModel'].forEach((name) => {
     app.querySelector(`[name="${name}"]`).addEventListener('change', (e) => {
-      s[name] = e.target.value.trim() || (name === 'apiKey' ? '' : DEFAULT_MODELS[name === 'sttModel' ? 'stt' : 'coach']);
+      s[name] = e.target.value.trim() || defaults[name];
       e.target.value = s[name];
       store.saveSettings();
       showEngine();

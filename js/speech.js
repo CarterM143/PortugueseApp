@@ -65,8 +65,12 @@ export function speak(text, settings, { rate, vary = false } = {}) {
   u.lang = v ? v.lang : 'pt-PT';
   u.rate = rate ?? settings.rate;
   return new Promise((resolve) => {
-    u.onend = resolve;
-    u.onerror = resolve;
+    // Some engines never fire onend (or have no voice): don't hang callers waiting for it
+    const guess = 1500 + (text.length * 110) / (u.rate || 1);
+    const timer = setTimeout(resolve, guess + 3000);
+    const done = () => { clearTimeout(timer); resolve(); };
+    u.onend = done;
+    u.onerror = done;
     synth.speak(u);
   });
 }
